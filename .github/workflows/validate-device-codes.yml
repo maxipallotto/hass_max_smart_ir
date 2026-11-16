@@ -3,7 +3,7 @@ name: Validate device codes
 on:
   pull_request:
     paths:
-      - "custom_components/ar_smart_ir/codes/**"
+      - "custom_components/max_smart_ir/codes/**"
 
 permissions:
   contents: read
@@ -30,7 +30,7 @@ jobs:
           git fetch origin ${{ github.base_ref }} --depth=1
           FILES=$(git diff --name-only --diff-filter=ACMR \
             origin/${{ github.base_ref }} HEAD -- \
-            'custom_components/ar_smart_ir/codes/**/*.json')
+            'custom_components/max_smart_ir/codes/**/*.json')
           echo "Changed files:"
           echo "$FILES"
           echo "files<<EOF" >> "$GITHUB_OUTPUT"
