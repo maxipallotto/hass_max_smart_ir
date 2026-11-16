@@ -50,7 +50,9 @@ changes before 1.7.5, see that repository.
   `power_sensor_restore_state`, `device_class`, `source_names`) have
   labels.
 - The setup wizard suggests the codeset's brand and model as the device
-  name (e.g. "Hyndai H-ARI22-09H") instead of "SmartIR Climate 2662".
+  name (e.g. "Hyundai H-ARI22-09H") instead of "SmartIR Climate 2662".
+- Codeset 2662 (H-ARI22-09H) is listed under Hyundai. Its brand was spelled
+  "Hyndai", so it showed up as a separate brand.
 - The setup wizard reads the codeset catalog and the codeset files off
   Home Assistant's event loop, which logged "Detected blocking call to
   listdir/open inside the event loop".
