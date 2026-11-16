@@ -55,7 +55,7 @@ def _get_broadlink_wrapper(hass: HomeAssistant, entity_id: str):
     """
     broadlink_data = hass.data.get("broadlink")
     if broadlink_data is None:
-        _LOGGER.debug("AR Smart IR: 'broadlink' not in hass.data")
+        _LOGGER.debug("MAX Smart IR: 'broadlink' not in hass.data")
         return None
 
     # BroadlinkData is a dataclass — use attribute access, not .get()
@@ -64,13 +64,13 @@ def _get_broadlink_wrapper(hass: HomeAssistant, entity_id: str):
     entity_reg = er.async_get(hass)
     entity_entry = entity_reg.async_get(entity_id)
     if entity_entry is None:
-        _LOGGER.debug("AR Smart IR: entity '%s' not found in registry", entity_id)
+        _LOGGER.debug("MAX Smart IR: entity '%s' not found in registry", entity_id)
         return None
 
     wrapper = devices.get(entity_entry.config_entry_id)
     if wrapper is None:
         _LOGGER.debug(
-            "AR Smart IR: no Broadlink device for config entry '%s'",
+            "MAX Smart IR: no Broadlink device for config entry '%s'",
             entity_entry.config_entry_id,
         )
     return wrapper
@@ -96,7 +96,7 @@ def _get_linknlink_wrapper(hass: HomeAssistant, entity_id: str):
     """
     data = hass.data.get("linknlink")
     if not data:
-        _LOGGER.debug("AR Smart IR: 'linknlink' not in hass.data")
+        _LOGGER.debug("MAX Smart IR: 'linknlink' not in hass.data")
         return None
 
     # The official core `linknlink` integration mirrors Broadlink: hass.data[DOMAIN]
@@ -107,7 +107,7 @@ def _get_linknlink_wrapper(hass: HomeAssistant, entity_id: str):
     devices = getattr(data, "devices", data)
     if not isinstance(devices, dict):
         _LOGGER.debug(
-            "AR Smart IR: unexpected 'linknlink' hass.data layout (%s); "
+            "MAX Smart IR: unexpected 'linknlink' hass.data layout (%s); "
             "cannot locate a learn device.",
             type(devices).__name__,
         )
@@ -116,13 +116,13 @@ def _get_linknlink_wrapper(hass: HomeAssistant, entity_id: str):
     entity_reg = er.async_get(hass)
     entity_entry = entity_reg.async_get(entity_id)
     if entity_entry is None:
-        _LOGGER.debug("AR Smart IR: entity '%s' not found in registry", entity_id)
+        _LOGGER.debug("MAX Smart IR: entity '%s' not found in registry", entity_id)
         return None
 
     coordinator = devices.get(entity_entry.config_entry_id)
     if coordinator is None:
         _LOGGER.debug(
-            "AR Smart IR: no LinkNLink device for config entry '%s'",
+            "MAX Smart IR: no LinkNLink device for config entry '%s'",
             entity_entry.config_entry_id,
         )
     return coordinator
@@ -163,7 +163,7 @@ async def _async_broadlink_learn(
     wrapper, kind = _resolve_learn_device(hass, remote_entity)
     if wrapper is None:
         raise HomeAssistantError(
-            f"AR Smart IR: Could not find a Broadlink or LinkNLink device for "
+            f"MAX Smart IR: Could not find a Broadlink or LinkNLink device for "
             f"entity '{remote_entity}'. Make sure it is a Broadlink or LinkNLink "
             "remote entity and that integration is loaded."
         )
@@ -171,12 +171,12 @@ async def _async_broadlink_learn(
     api = getattr(wrapper, "api", None)
     if api is None:
         raise HomeAssistantError(
-            f"AR Smart IR: {kind} device for '{remote_entity}' has no .api — "
+            f"MAX Smart IR: {kind} device for '{remote_entity}' has no .api — "
             "the integration may not have finished setting up."
         )
 
     _LOGGER.debug(
-        "AR Smart IR: Entering IR learn mode on %s (%s, timeout %ss)",
+        "MAX Smart IR: Entering IR learn mode on %s (%s, timeout %ss)",
         remote_entity,
         kind,
         timeout,
@@ -187,7 +187,7 @@ async def _async_broadlink_learn(
         await wrapper.async_request(api.enter_learning)
     except Exception as err:
         raise HomeAssistantError(
-            f"AR Smart IR: Failed to enter learn mode on '{remote_entity}': {err}"
+            f"MAX Smart IR: Failed to enter learn mode on '{remote_entity}': {err}"
         ) from err
 
     # Poll for a captured code every 0.6 s.
@@ -203,18 +203,18 @@ async def _async_broadlink_learn(
 
         if data:
             code = b64encode(data).decode("utf-8")
-            _LOGGER.debug("AR Smart IR: Captured IR code from %s", remote_entity)
+            _LOGGER.debug("MAX Smart IR: Captured IR code from %s", remote_entity)
             return code
 
     raise HomeAssistantError(
-        f"AR Smart IR: Timed out after {timeout}s — no IR signal received on "
+        f"MAX Smart IR: Timed out after {timeout}s — no IR signal received on "
         f"'{remote_entity}'. Point your physical remote directly at the {kind} "
         "device and press the button firmly, then try again."
     )
 
 
 async def _async_handle_learn_command(call: ServiceCall) -> None:
-    """Service handler for ar_smart_ir.learn_command."""
+    """Service handler for max_smart_ir.learn_command."""
     hass: HomeAssistant = call.hass
     entry_id: str = call.data["entry_id"]
     command_path_str: str = call.data["command_path"]
@@ -225,25 +225,25 @@ async def _async_handle_learn_command(call: ServiceCall) -> None:
     entry = hass.config_entries.async_get_entry(entry_id)
     if entry is None:
         raise HomeAssistantError(
-            f"AR Smart IR: No config entry found with ID '{entry_id}'."
+            f"MAX Smart IR: No config entry found with ID '{entry_id}'."
         )
     if entry.domain != DOMAIN:
         raise HomeAssistantError(
-            f"AR Smart IR: Entry '{entry_id}' does not belong to {DOMAIN}."
+            f"MAX Smart IR: Entry '{entry_id}' does not belong to {DOMAIN}."
         )
 
     # ── parse command path ────────────────────────────────────────────────────
     command_path = tuple(part.strip() for part in command_path_str.split("/"))
     if not all(command_path):
         raise HomeAssistantError(
-            f"AR Smart IR: Invalid command path '{command_path_str}'. "
+            f"MAX Smart IR: Invalid command path '{command_path_str}'. "
             "Use the slash-separated format shown in the options dropdown, "
             "e.g. 'cool / auto / 24' or 'power'."
         )
 
     # ── learn the IR code ─────────────────────────────────────────────────────
     _LOGGER.info(
-        "AR Smart IR: Starting IR learn for entry '%s', path '%s' via %s",
+        "MAX Smart IR: Starting IR learn for entry '%s', path '%s' via %s",
         entry_id,
         command_path_str,
         remote_entity,
@@ -272,7 +272,7 @@ async def _async_handle_learn_command(call: ServiceCall) -> None:
     hass.config_entries.async_update_entry(entry, options=new_options)
 
     _LOGGER.info(
-        "AR Smart IR: Learned IR code saved for entry '%s' at path '%s'.",
+        "MAX Smart IR: Learned IR code saved for entry '%s' at path '%s'.",
         entry_id,
         command_path_str,
     )
@@ -286,9 +286,9 @@ CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
-    """Set up AR Smart IR component."""
+    """Set up MAX Smart IR component."""
 
-    # Materialise anything sitting in the /config/ar_smart_ir_import inbox into
+    # Materialise anything sitting in the /config/max_smart_ir_import inbox into
     # the canonical codeset store. Runs on every HA start and integration
     # reload; also self-heals codesets that went missing from the store.
     async def _run_import() -> dict:
@@ -312,12 +312,12 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Set up AR Smart IR from a config entry."""
+    """Set up MAX Smart IR from a config entry."""
 
     platform: str | None = entry.data.get("platform")
 
     if platform not in PLATFORMS:
-        _LOGGER.error("Unsupported AR Smart IR platform: %s", platform)
+        _LOGGER.error("Unsupported MAX Smart IR platform: %s", platform)
         return False
 
     if not hass.services.has_service(DOMAIN, "learn_command"):
@@ -327,7 +327,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _async_handle_learn_command,
             schema=LEARN_COMMAND_SCHEMA,
         )
-        _LOGGER.debug("AR Smart IR: Registered learn_command service")
+        _LOGGER.debug("MAX Smart IR: Registered learn_command service")
 
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     # The button platform holds the entry's custom commands, one button each.
@@ -339,7 +339,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Unload AR Smart IR config entry."""
+    """Unload MAX Smart IR config entry."""
 
     platform: str | None = entry.data.get("platform")
 

@@ -15,12 +15,15 @@ _LOGGER = logging.getLogger(__name__)
 COMPONENT_ABS_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # User-editable codeset directory that survives HACS updates.
-# The component lives at <config>/custom_components/ar_smart_ir, so the HA
-# config dir is two levels up. Custom codesets (e.g. exported by AR Smart IR
-# Builder) go in <config>/ar_smart_ir_codes/<platform>/<code>.json and are
+# The component lives at <config>/custom_components/max_smart_ir, so the HA
+# config dir is two levels up. Custom codesets (e.g. exported by MAX Smart IR
+# Builder) go in <config>/max_smart_ir_codes/<platform>/<code>.json and are
 # merged into the catalog on top of the bundled codes.
 CONFIG_ABS_DIR = os.path.abspath(os.path.join(COMPONENT_ABS_DIR, "..", ".."))
-CUSTOM_CODES_ROOT = os.path.join(CONFIG_ABS_DIR, "ar_smart_ir_codes")
+CUSTOM_CODES_ROOT = os.path.join(CONFIG_ABS_DIR, "max_smart_ir_codes")
+# Where AR Smart IR, which this integration is based on, kept custom codesets.
+# Still read, so codesets put there keep working; the folder above wins.
+LEGACY_CUSTOM_CODES_ROOT = os.path.join(CONFIG_ABS_DIR, "ar_smart_ir_codes")
 
 
 def get_codes_dir(platform: str) -> str:
@@ -31,17 +34,22 @@ def get_custom_codes_dir(platform: str) -> str:
     return os.path.join(CUSTOM_CODES_ROOT, platform)
 
 
+def get_legacy_custom_codes_dir(platform: str) -> str:
+    return os.path.join(LEGACY_CUSTOM_CODES_ROOT, platform)
+
+
 def _resolve_code_path(platform: str, device_code: int | str) -> str:
     """Return the path to a codeset, preferring the user custom dir.
 
-    A file in <config>/ar_smart_ir_codes/<platform>/ overrides a bundled code
+    A file in <config>/max_smart_ir_codes/<platform>/ overrides a bundled code
     with the same number, so users can patch a shipped codeset without editing
     the (HACS-managed) integration folder.
     """
     filename = f"{device_code}.json"
-    custom = os.path.join(get_custom_codes_dir(platform), filename)
-    if os.path.isfile(custom):
-        return custom
+    for directory in (get_custom_codes_dir(platform), get_legacy_custom_codes_dir(platform)):
+        custom = os.path.join(directory, filename)
+        if os.path.isfile(custom):
+            return custom
     return os.path.join(get_codes_dir(platform), filename)
 
 
@@ -463,7 +471,7 @@ def device_info_for(
     manufacturer: str | None,
     models: Any,
 ) -> dict[str, Any] | None:
-    """Device registry info shared by every entity of one AR Smart IR entry.
+    """Device registry info shared by every entity of one MAX Smart IR entry.
 
     Gives the entry a device (named after it, with the codeset's brand and
     model) so its entities, custom command buttons included, show together.
@@ -509,6 +517,7 @@ def load_catalog(platform: str) -> list[dict[str, Any]]:
 
     for directory, is_custom in (
         (get_codes_dir(platform), False),
+        (get_legacy_custom_codes_dir(platform), True),
         (get_custom_codes_dir(platform), True),
     ):
         if not os.path.isdir(directory):

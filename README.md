@@ -1,14 +1,14 @@
-# AR Smart IR
+# MAX Smart IR
 
-[![Latest Release](https://img.shields.io/github/v/release/pallemannen/hass_ar_smart_ir?include_prereleases)](https://github.com/pallemannen/hass_ar_smart_ir/releases)
+[![Latest Release](https://img.shields.io/github/v/release/maxipallotto/hass_max_smart_ir?include_prereleases)](https://github.com/maxipallotto/hass_max_smart_ir/releases)
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
-[![Stars](https://img.shields.io/github/stars/pallemannen/hass_ar_smart_ir)](https://github.com/pallemannen/hass_ar_smart_ir/stargazers)
+[![Stars](https://img.shields.io/github/stars/maxipallotto/hass_max_smart_ir)](https://github.com/maxipallotto/hass_max_smart_ir/stargazers)
 
 
 
 [![Add to HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](
-  https://my.home-assistant.io/redirect/hacs_repository/?owner=pallemannen&repository=hass_ar_smart_ir&category=integration
+  https://my.home-assistant.io/redirect/hacs_repository/?owner=maxipallotto&repository=hass_max_smart_ir&category=integration
 )
 
 
@@ -17,11 +17,11 @@
 
 
 
-**AR Smart IR** is a modern Home Assistant custom integration for infrared-controlled devices, built to simplify SmartIR-style setups through the Home Assistant UI.
+**MAX Smart IR** is a Home Assistant custom integration for infrared-controlled devices (air conditioners, TVs, fans and lights), set up and configured entirely from the Home Assistant UI.
 
-Originally built around Broadlink, AR Smart IR is actively being expanded as support for newer devices and controller methods is developed and tested over time. Current work includes ongoing improvements around MQTT, ESPHome, HEX-based IR codes, and raw command conversion.
+It is based on [AR Smart IR](https://github.com/marsh4200/ar_smart_ir) by marsh4200. MAX Smart IR adds device-wide and per-command repeats, your own custom commands as buttons, and a single options form per device.
 
-It is designed for users who want a cleaner, more modern SmartIR experience without relying on legacy YAML setup.
+> **Coming from AR Smart IR?** MAX Smart IR is a separate integration (domain `max_smart_ir`). Remove the AR Smart IR device and add it again here. Custom codesets in `/config/ar_smart_ir_codes` keep working; new ones go in `/config/max_smart_ir_codes`.
 
 
 
@@ -40,7 +40,10 @@ It is designed for users who want a cleaner, more modern SmartIR experience with
 - 🖥️ Setup directly from the **Home Assistant UI**
 - 🚫 No full legacy YAML setup required
 - 📦 Includes a bundled **local IR codes database**
-- 🔁 Supports **command repeat** and **sequence handling**
+- 🔁 **Repeat commands**: send every command more than once, with one delay between sends, and give some commands their own count
+- 🎛️ **Custom commands**: add your own commands (recorded with the original remote, or pasted as Broadlink Base64, Pronto or Raw); each one is a button of the device
+- 🧭 **One options form per device**: name, controller, repeats, custom commands, sensors and advanced settings in sections
+- 🔁 Supports **sequence handling**
 - 🛠️ Supports **command override** workflows
 - 📚 Includes a **Broadlink learn service** for saving replacement commands
 - 🔄 Includes command conversion support between **Base64**, **HEX**, **Pronto**, and **Raw** where applicable
@@ -53,7 +56,7 @@ It is designed for users who want a cleaner, more modern SmartIR experience with
 
 ## 🚀 Supported Platforms
 
-AR Smart IR currently supports:
+MAX Smart IR currently supports:
 
 - `climate`
 - `media_player`
@@ -64,7 +67,7 @@ AR Smart IR currently supports:
 
 ## 📡 Supported Controllers
 
-AR Smart IR supports multiple controller methods used in Home Assistant:
+MAX Smart IR supports multiple controller methods used in Home Assistant:
 
 - **Broadlink**
 - **MQTT**
@@ -76,7 +79,7 @@ AR Smart IR supports multiple controller methods used in Home Assistant:
 - **UFO-R11**
 
 The **Infrared** controller consumes an existing Home Assistant native infrared
-emitter entity. It does not expose AR Smart IR itself as an infrared emitter or
+emitter entity. It does not expose MAX Smart IR itself as an infrared emitter or
 receiver, and native infrared receiver-based learning is not supported yet.
 
 Controller support continues to improve, especially for newer MQTT- and raw-based workflows.
@@ -86,7 +89,7 @@ Controller support continues to improve, especially for newer MQTT- and raw-base
 ## 🔌 ESPHome Controller Setup
 
 The **ESPHome** controller sends raw IR timings to a user-defined action on your
-ESPHome node. You define the action once in your ESPHome YAML, and AR Smart IR
+ESPHome node. You define the action once in your ESPHome YAML, and MAX Smart IR
 calls it with the decoded `int[]` timing array.
 
 ### 1. ESPHome configuration
@@ -129,9 +132,9 @@ remote_transmitter:
 
 > On older ESPHome versions the `actions:` key is named `services:`.
 
-### 2. Point AR Smart IR at the action
+### 2. Point MAX Smart IR at the action
 
-In the AR Smart IR setup flow, select **ESPHome** as the controller and set
+In the MAX Smart IR setup flow, select **ESPHome** as the controller and set
 **Controller data / service name** to the action exactly as it appears in Home
 Assistant (Developer Tools → Actions), including the node-name prefix — for
 example:
@@ -151,9 +154,9 @@ why the same code works there but not over a bare ESPHome `transmit_raw`. Add th
 
 ---
 
-## 🆕 What Makes AR Smart IR Different?
+## 🆕 What Makes MAX Smart IR Different?
 
-AR Smart IR modernizes the classic SmartIR-style experience by focusing on UI-driven setup, cleaner structure, and broader controller flexibility.
+MAX Smart IR modernizes the classic SmartIR-style experience by focusing on UI-driven setup, cleaner structure, and broader controller flexibility.
 
 ### Improvements
 
@@ -192,7 +195,7 @@ Some controller and device combinations may still need real-world validation, bu
 
 Click below to open the repository in HACS:
 
-[![Open your Home Assistant instance and open this repository in HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=pallemannen&repository=hass_ar_smart_ir&category=integration)
+[![Open your Home Assistant instance and open this repository in HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=maxipallotto&repository=hass_max_smart_ir&category=integration)
 
 ### Manual Installation
 
@@ -201,7 +204,7 @@ Copy the integration into your Home Assistant `custom_components` directory:
 ```text
 config/
 └── custom_components/
-    └── ar_smart_ir/
+    └── max_smart_ir/
 Then restart Home Assistant.
 
 🔧 Setup
@@ -210,14 +213,14 @@ After installation:
 Restart Home Assistant
 Go to Settings → Devices & Services
 Click Add Integration
-Search for AR Smart IR
+Search for MAX Smart IR
 Follow the setup flow in the UI
 📡 IR Code Database
-AR Smart IR uses a bundled local IR code database stored inside the integration.
+MAX Smart IR uses a bundled local IR code database stored inside the integration.
 
 Example location:
 
-custom_components/ar_smart_ir/codes/
+custom_components/max_smart_ir/codes/
 Each supported platform has its own folder, such as:
 
 codes/climate/
@@ -264,7 +267,7 @@ Climate codesets can optionally declare AC presets (e.g. Eco, Quiet, Comfort on 
 The "none" preset holds the standard commands. If a preset is missing at any point in the tree, the integration falls back to "none" (or the flat temperature layout). Existing codesets without `presetModes` are completely unaffected and keep the original format.
 
 🛑 Passive Mode (optional)
-Climate entities have an optional Passive mode toggle in the setup and options flow. When enabled, AR Smart IR never re-sends a command unless something actually changed (mode, fan, swing, preset, or target temperature), and only sends the discrete "on" command when the unit is genuinely being switched on. This lets the AC unit's own built-in thermostat and hysteresis manage the temperature — AR Smart IR only transmits when you make a control change. It is off by default, so existing setups behave exactly as before.
+Climate entities have an optional Passive mode toggle in the setup and options flow. When enabled, MAX Smart IR never re-sends a command unless something actually changed (mode, fan, swing, preset, or target temperature), and only sends the discrete "on" command when the unit is genuinely being switched on. This lets the AC unit's own built-in thermostat and hysteresis manage the temperature — MAX Smart IR only transmits when you make a control change. It is off by default, so existing setups behave exactly as before.
 
 📌 Notes
 This project was originally based on and tested around Broadlink, but support has expanded significantly beyond that
@@ -273,7 +276,7 @@ Some setups may still require device-specific testing depending on the IR blaste
 Real-world compatibility can vary based on the quality and structure of the source code file being used
 Native Home Assistant Infrared support requires Home Assistant 2026.4.0 or newer
 🙌 Credits
-AR Smart IR is inspired by the original SmartIR project and the wider Home Assistant community.
+MAX Smart IR is based on [AR Smart IR](https://github.com/marsh4200/ar_smart_ir) by marsh4200 (ARSmartHome), released under the MIT License (see [LICENSE](LICENSE)). MAX Smart IR is inspired by the original SmartIR project and the wider Home Assistant community.
 
 
 

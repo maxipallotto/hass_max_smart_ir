@@ -1,7 +1,7 @@
-# ar_smart_ir — irdb code importer
+# max_smart_ir — irdb code importer
 
 Pull IR codes from the **irdb** project (`probonopd/irdb`, the "Wikipedia of IR
-codes") and write them as `ar_smart_ir` device-code files.
+codes") and write them as `max_smart_ir` device-code files.
 
 irdb stores codes as `protocol,device,subdevice,function`. These tools render
 each function to **Pronto hex** (`commandsEncoding: "Pronto"`), which your

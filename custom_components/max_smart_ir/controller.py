@@ -1,5 +1,5 @@
 """
-AR Smart IR — controller layer.
+MAX Smart IR — controller layer.
 
 This is the file that the user reported was "not transcoding" anything except
 for the Broadlink path. It has been substantially rewritten so that every

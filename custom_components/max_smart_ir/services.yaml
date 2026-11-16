@@ -2,11 +2,11 @@ learn_command:
   name: Learn command
   description: >-
     Learn an IR command from a Broadlink or LinkNLink remote and store it as a
-    command override on an AR Smart IR entity.
+    command override on an MAX Smart IR entity.
   fields:
     entry_id:
       name: Config entry
-      description: The config entry ID of the AR Smart IR entity to update.
+      description: The config entry ID of the MAX Smart IR entity to update.
       required: true
       example: 01HZXABCDEF1234567890
       selector:
@@ -43,7 +43,7 @@ learn_command:
 import_codes:
   name: Import codesets
   description: >-
-    Install any codeset JSON files placed in /config/ar_smart_ir_import/ into the
+    Install any codeset JSON files placed in /config/max_smart_ir_import/ into the
     canonical store the add-device list reads from. Runs automatically on start
     and reload; use this to pick up new files without restarting. Won't overwrite
     codesets you've already installed or edited.

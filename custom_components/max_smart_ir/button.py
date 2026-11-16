@@ -52,7 +52,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
             config.get(CONF_DEVICE_CODE), config.get(CONF_PLATFORM)
         )
     except Exception as err:  # noqa: BLE001
-        _LOGGER.warning("AR Smart IR: could not read the codeset for device info: %s", err)
+        _LOGGER.warning("MAX Smart IR: could not read the codeset for device info: %s", err)
     else:
         device_info = device_info_for(
             config.get("unique_id"),

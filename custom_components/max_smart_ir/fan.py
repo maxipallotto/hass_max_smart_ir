@@ -305,7 +305,7 @@ class SmartIRFan(FanEntity, RestoreEntity):
 
             if power_code is None or cycle_code is None:
                 _LOGGER.error(
-                    "ar_smart_ir fan toggleMode requires 'power' and "
+                    "max_smart_ir fan toggleMode requires 'power' and "
                     "'speed_cycle' commands in the device file"
                 )
                 return

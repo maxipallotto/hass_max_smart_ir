@@ -445,7 +445,7 @@ def _learning_remote(hass, controller: str, target: str) -> str | None:
     return None
 
 
-class ARSmartIRConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+class MaxSmartIRConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
     def __init__(self) -> None:
@@ -913,10 +913,10 @@ class ARSmartIRConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     @staticmethod
     def async_get_options_flow(config_entry):
-        return ARSmartIROptionsFlow(config_entry)
+        return MaxSmartIROptionsFlow(config_entry)
 
 
-class ARSmartIROptionsFlow(config_entries.OptionsFlow):
+class MaxSmartIROptionsFlow(config_entries.OptionsFlow):
     """Options: one form, in sections.
 
     Name and controller at the top, then Repeat commands (the device's count,
@@ -1407,7 +1407,7 @@ class ARSmartIROptionsFlow(config_entries.OptionsFlow):
         try:
             code = task.result()
         except Exception as err:  # noqa: BLE001
-            _LOGGER.debug("AR Smart IR: recording a custom command failed: %s", err)
+            _LOGGER.debug("MAX Smart IR: recording a custom command failed: %s", err)
             return self.async_show_progress_done(next_step_id="record_failed")
 
         self._recorded[self._queue[self._queue_pos]] = code

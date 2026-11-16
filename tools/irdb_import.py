@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
 irdb_import.py — pull IR codes from the irdb project (probonopd/irdb) and write
-ar_smart_ir device-code JSON files.
+max_smart_ir device-code JSON files.
 
 irdb stores codes as protocol/device/subdevice/function. We render each function
-to Pronto hex via ir_render.py and emit files in ar_smart_ir's native schema
+to Pronto hex via ir_render.py and emit files in max_smart_ir's native schema
 with commandsEncoding "Pronto", so the controller-layer transcoder can fan them
 out to Broadlink / Xiaomi / MQTT / LOOKin / ESPHome / Tuya unchanged.
 
@@ -16,7 +16,7 @@ Examples
 # Grow the media_player library with one good code set per TV brand:
 python3 tools/irdb_import.py --device-type TV --platform media_player \
     --start-code 40001 --per-brand 1 \
-    --out custom_components/ar_smart_ir/codes/media_player
+    --out custom_components/max_smart_ir/codes/media_player
 
 # Just a few named brands, more sets each:
 python3 tools/irdb_import.py --device-type TV --platform media_player \
@@ -40,7 +40,7 @@ import ir_render as R  # noqa: E402
 RAW = "https://raw.githubusercontent.com/probonopd/irdb/master/codes"
 INDEX_URL = f"{RAW}/index"
 
-# ── irdb function name → ar_smart_ir media_player command key ─────────────────
+# ── irdb function name → max_smart_ir media_player command key ─────────────────
 
 POWER_ON = {"POWER ON", "POWER_ON", "ON"}
 POWER_OFF = {"POWER OFF", "POWER_OFF", "OFF", "STANDBY"}
@@ -62,7 +62,7 @@ def normalize(name: str) -> str:
 
 
 def build_commands(rows: list[dict]) -> tuple[dict, dict]:
-    """Return (commands, stats). commands is the ar_smart_ir command tree."""
+    """Return (commands, stats). commands is the max_smart_ir command tree."""
     commands: dict = {}
     sources: dict = {}
     stats = {"rendered": 0, "skipped": 0, "skipped_protocols": defaultdict(int)}
@@ -172,14 +172,14 @@ def main() -> int:
     ap.add_argument("--device-type", default="TV",
                     help="irdb device type to import (default: TV)")
     ap.add_argument("--platform", default="media_player",
-                    help="ar_smart_ir platform folder name")
+                    help="max_smart_ir platform folder name")
     ap.add_argument("--brands", default="",
                     help="comma-separated brand allow-list (default: all)")
     ap.add_argument("--per-brand", type=int, default=1,
                     help="max code sets to import per brand")
     ap.add_argument("--start-code", type=int, default=40001,
                     help="first device_code number to allocate")
-    ap.add_argument("--out", default="custom_components/ar_smart_ir/codes/media_player",
+    ap.add_argument("--out", default="custom_components/max_smart_ir/codes/media_player",
                     help="output directory")
     ap.add_argument("--min-commands", type=int, default=4,
                     help="skip code sets that render fewer than this many commands")

@@ -3,7 +3,7 @@ ir_render.py — render irdb (protocol, device, subdevice, function) tuples to
 Pronto hex.
 
 irdb stores codes as protocol/device/subdevice/function, NOT as raw IR. To use
-them in ar_smart_ir we render them to Pronto hex (commandsEncoding: "Pronto"),
+them in max_smart_ir we render them to Pronto hex (commandsEncoding: "Pronto"),
 which the controller-layer transcoder then fans out to Broadlink / Xiaomi /
 MQTT / LOOKin / ESPHome / Tuya automatically.
 
@@ -23,7 +23,7 @@ A Pronto "learned" (one-time) code is:
     word3 = burst-pair-2 count     (0 — no repeat sequence)
     word4.. = alternating mark/space lengths, in carrier-period ticks
 
-This is exactly the shape custom_components/ar_smart_ir/helpers.py:Helper
+This is exactly the shape custom_components/max_smart_ir/helpers.py:Helper
 .pronto2lirc expects, so rendered codes round-trip through the integration's
 own converters.
 """

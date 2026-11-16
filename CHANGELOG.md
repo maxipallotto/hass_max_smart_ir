@@ -1,10 +1,18 @@
 # Changelog
 
-All notable changes to this fork are documented here, starting from where
-we took over maintenance. For history before that, see the original
-[marsh4200/ar_smart_ir](https://github.com/marsh4200/ar_smart_ir).
+All notable changes to MAX Smart IR. It is based on
+[AR Smart IR](https://github.com/marsh4200/ar_smart_ir) by marsh4200; for
+changes before 1.7.5, see that repository.
 
-## Unreleased
+## 2.0.0
+
+- **Renamed to MAX Smart IR**, with its own domain (`max_smart_ir`) and logo.
+  This is a separate integration from AR Smart IR: devices set up with AR
+  Smart IR have to be added again. Custom codesets in
+  `/config/ar_smart_ir_codes` and files in `/config/ar_smart_ir_import` are
+  still read; new ones go in `/config/max_smart_ir_codes` and
+  `/config/max_smart_ir_import`. The learn action is now
+  `max_smart_ir.learn_command`.
 
 - **Options are one form, in sections**, for the device they belong to:
   - At the top, the device (type, brand, model and code; changed with
@@ -64,6 +72,4 @@ we took over maintenance. For history before that, see the original
 
 ## 1.7.5
 
-- First release under this fork. No functional changes from upstream
-  v1.7.4 - links, badges, and the "archived" banner updated to point at
-  this fork instead of the original.
+- No functional changes from AR Smart IR 1.7.4.

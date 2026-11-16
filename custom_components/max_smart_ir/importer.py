@@ -1,8 +1,8 @@
 """Self-healing codeset importer.
 
-Anything dropped into <config>/ar_smart_ir_import/ is materialised into the
-canonical store <config>/ar_smart_ir_codes/<platform>/<code>.json on startup,
-on integration reload, and on demand via the ar_smart_ir.import_codes service.
+Anything dropped into <config>/max_smart_ir_import/ is materialised into the
+canonical store <config>/max_smart_ir_codes/<platform>/<code>.json on startup,
+on integration reload, and on demand via the max_smart_ir.import_codes service.
 
 Why this exists
 ---------------
@@ -33,32 +33,39 @@ import logging
 import os
 from typing import Any
 
-from .helpers import CONFIG_ABS_DIR, get_codes_dir, get_custom_codes_dir
+from .helpers import (
+    CONFIG_ABS_DIR,
+    get_codes_dir,
+    get_custom_codes_dir,
+    get_legacy_custom_codes_dir,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = ("climate", "fan", "light", "media_player")
-IMPORT_ROOT = os.path.join(CONFIG_ABS_DIR, "ar_smart_ir_import")
+IMPORT_ROOT = os.path.join(CONFIG_ABS_DIR, "max_smart_ir_import")
+# AR Smart IR's inbox: files still dropped there are imported too.
+LEGACY_IMPORT_ROOT = os.path.join(CONFIG_ABS_DIR, "ar_smart_ir_import")
 _LEDGER_NAME = ".assigned.json"
 _FIRST_CUSTOM_CODE = 9000
 
 _README = """\
-AR Smart IR — codeset import inbox
+MAX Smart IR — codeset import inbox
 ==================================
 
-Drop ar_smart_ir codeset JSON files in here (optionally inside a platform
+Drop max_smart_ir codeset JSON files in here (optionally inside a platform
 sub-folder: climate/ fan/ light/ media_player/). On the next Home Assistant
-start, integration reload, or when you call the ar_smart_ir.import_codes
+start, integration reload, or when you call the max_smart_ir.import_codes
 service, each file is installed into:
 
-    /config/ar_smart_ir_codes/<platform>/<code>.json
+    /config/max_smart_ir_codes/<platform>/<code>.json
 
 ...which is what the integration's add-device list reads from.
 
 Notes
 -----
 * You do NOT edit files here to change a codeset. Edit the installed copy in
-  /config/ar_smart_ir_codes/<platform>/<code>.json instead — this inbox never
+  /config/max_smart_ir_codes/<platform>/<code>.json instead — this inbox never
   overwrites an existing installed codeset.
 * Numeric filenames (e.g. 9001.json) keep that code. Any other name is given the
   next free number starting at 9000, remembered in .assigned.json.
@@ -116,12 +123,16 @@ def _save_ledger(ledger: dict[str, dict[str, int]]) -> None:
         with open(path, "w", encoding="utf-8") as f:
             json.dump(ledger, f, indent=2, sort_keys=True)
     except OSError as err:
-        _LOGGER.warning("AR Smart IR import: couldn't write ledger %s: %s", path, err)
+        _LOGGER.warning("MAX Smart IR import: couldn't write ledger %s: %s", path, err)
 
 
 def _used_codes(platform: str, ledger: dict[str, dict[str, int]]) -> set[int]:
     used: set[int] = set()
-    for directory in (get_codes_dir(platform), get_custom_codes_dir(platform)):
+    for directory in (
+        get_codes_dir(platform),
+        get_legacy_custom_codes_dir(platform),
+        get_custom_codes_dir(platform),
+    ):
         if not os.path.isdir(directory):
             continue
         for filename in os.listdir(directory):
@@ -142,14 +153,17 @@ def _next_free_code(used: set[int]) -> int:
 def _iter_dropins() -> list[tuple[str, str | None]]:
     """(path, platform_hint) for each JSON in the inbox, ledger/hidden aside."""
     found: list[tuple[str, str | None]] = []
-    for root, _dirs, files in os.walk(IMPORT_ROOT):
-        rel = os.path.relpath(root, IMPORT_ROOT)
-        parts = [] if rel == "." else rel.split(os.sep)
-        hint = parts[0] if parts and parts[0] in PLATFORMS else None
-        for filename in sorted(files):
-            if not filename.endswith(".json") or filename.startswith("."):
-                continue
-            found.append((os.path.join(root, filename), hint))
+    for inbox in (IMPORT_ROOT, LEGACY_IMPORT_ROOT):
+        if not os.path.isdir(inbox):
+            continue
+        for root, _dirs, files in os.walk(inbox):
+            rel = os.path.relpath(root, inbox)
+            parts = [] if rel == "." else rel.split(os.sep)
+            hint = parts[0] if parts and parts[0] in PLATFORMS else None
+            for filename in sorted(files):
+                if not filename.endswith(".json") or filename.startswith("."):
+                    continue
+                found.append((os.path.join(root, filename), hint))
     return found
 
 
@@ -173,7 +187,7 @@ def import_dropins() -> dict[str, Any]:
             with open(readme, "w", encoding="utf-8") as f:
                 f.write(_README)
     except OSError as err:
-        _LOGGER.warning("AR Smart IR import: inbox not usable (%s)", IMPORT_ROOT)
+        _LOGGER.warning("MAX Smart IR import: inbox not usable (%s)", IMPORT_ROOT)
         summary["errors"].append(f"{IMPORT_ROOT}: {err}")
         return summary
 
@@ -194,7 +208,7 @@ def import_dropins() -> dict[str, Any]:
             continue
 
         if not isinstance(raw, dict) or not isinstance(raw.get("commands"), (dict, list)):
-            summary["errors"].append(f"{name}: not an ar_smart_ir codeset")
+            summary["errors"].append(f"{name}: not an max_smart_ir codeset")
             continue
 
         explicit = raw.get("platform")
@@ -253,12 +267,12 @@ def import_dropins() -> dict[str, Any]:
     total = len(summary["imported"]) + len(summary["restored"])
     if total or summary["errors"]:
         _LOGGER.info(
-            "AR Smart IR import: %d installed, %d already present, %d error(s)",
+            "MAX Smart IR import: %d installed, %d already present, %d error(s)",
             total,
             len(summary["skipped"]),
             len(summary["errors"]),
         )
     for err in summary["errors"]:
-        _LOGGER.warning("AR Smart IR import: %s", err)
+        _LOGGER.warning("MAX Smart IR import: %s", err)
 
     return summary

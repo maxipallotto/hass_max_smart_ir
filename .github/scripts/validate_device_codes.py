@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate ar_smart_ir device code JSON files.
+"""Validate max_smart_ir device code JSON files.
 
 Usage: validate_device_codes.py <file.json> [file.json ...]
 

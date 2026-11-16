@@ -1,5 +1,5 @@
 name: Bug Report
-description: Report a problem with the AR Smart IR integration
+description: Report a problem with the MAX Smart IR integration
 title: "[Bug]: "
 labels: ["bug"]
 body:
@@ -11,8 +11,8 @@ body:
   - type: input
     id: integration_version
     attributes:
-      label: AR Smart IR version
-      description: Found in HACS, or in Settings → Devices & Services → AR Smart IR.
+      label: MAX Smart IR version
+      description: Found in HACS, or in Settings → Devices & Services → MAX Smart IR.
       placeholder: "e.g. 1.3.3"
     validations:
       required: true
@@ -91,7 +91,7 @@ body:
         ```yaml
         logger:
           logs:
-            custom_components.ar_smart_ir: debug
+            custom_components.max_smart_ir: debug
         ```
       render: text
 
