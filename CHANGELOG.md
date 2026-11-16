@@ -4,6 +4,11 @@ All notable changes to MAX Smart IR. It is based on
 [AR Smart IR](https://github.com/marsh4200/ar_smart_ir) by marsh4200; for
 changes before 1.7.5, see that repository.
 
+## 2.0.1
+
+- Codeset 2662 (H-ARI22-09H) is listed under Hyundai. Its brand was spelled
+  "Hyndai", so it showed up as a separate brand.
+
 ## 2.0.0
 
 - **Renamed to MAX Smart IR**, with its own domain (`max_smart_ir`) and logo.
@@ -51,8 +56,6 @@ changes before 1.7.5, see that repository.
   labels.
 - The setup wizard suggests the codeset's brand and model as the device
   name (e.g. "Hyundai H-ARI22-09H") instead of "SmartIR Climate 2662".
-- Codeset 2662 (H-ARI22-09H) is listed under Hyundai. Its brand was spelled
-  "Hyndai", so it showed up as a separate brand.
 - The setup wizard reads the codeset catalog and the codeset files off
   Home Assistant's event loop, which logged "Detected blocking call to
   listdir/open inside the event loop".
