@@ -6,27 +6,44 @@ we took over maintenance. For history before that, see the original
 
 ## Unreleased
 
-- Add a device-wide repeat: every command that does not set its own repeat
-  count or delay is sent that many times, that far apart. Useful when a
-  device sometimes misses a command. Per-command repeat settings and
-  codesets that set `num_repeats` keep working as before; the default is 1,
-  so nothing changes until it is raised.
-- Learning a code no longer pins the command to a single send: a learned
-  code follows the device-wide repeat, unless the command already had its
-  own repeat settings, which are now kept.
-- Options are now a menu: **General settings** (which holds the
-  device-wide repeat) or **Repeat or learn one command**. Picking a
-  command has a screen of its own with a searchable list. Before, the
-  list sat at the bottom of the long settings form, where clicking it
-  could jump the dialog back to the top without opening, so no command
-  other than the first could be picked.
-- The next screen shows the picked command's current repeat settings, or
-  that it follows the device default, instead of keeping the previous
-  command's values in the fields.
-- Changing a learned command's repeat settings no longer deletes the
-  learned code.
-- Repeat count is a number box instead of a slider that did not show its
-  value.
+- **Options are one form, in sections**, for the device they belong to:
+  - At the top, the device (type, brand, model and code; changed with
+    Reconfigure), its name and its controller. The controller's target has
+    its own label: Infrared emitter, Remote entity, MQTT topic, LOOKin
+    address, ESPHome service or Tuya topic or JSON.
+  - **Repeat commands**: how many times every command is sent, one delay
+    between sends (also used between the codes of a command), and a list of
+    commands with their own count, edited in place. Commands are picked
+    from a searchable list; `cool/low/24` is accepted for
+    `cool / low / 24`.
+  - **Custom commands**: your own commands (name and code), edited in
+    place. Each one is a button of the device. A code can be pasted
+    (Broadlink Base64, Pronto or Raw, checked when you save) or left empty
+    to be recorded with the original remote after Submit, through the
+    Broadlink or LinkNLink remote next to the emitter.
+  - **Sensors** and **Advanced**, collapsed, with what applies to the
+    device type.
+  - Nothing is saved until Submit.
+- A device-wide repeat count: every command that does not have its own
+  count is sent that many times. Codesets that set `num_repeats` keep
+  theirs. The default is 1, so nothing changes until it is raised.
+- One delay: "Delay between sends" replaces "Delay between commands" and is
+  also the delay between repeats. A delay saved for a single command is
+  dropped.
+- Each entry now has a device (named after it, with the codeset's brand and
+  model), so its entity and its custom command buttons show together.
+- Reconfigure: what it sets (controller, name, sensors, delay) now replaces
+  the same settings saved in the options. Before, the options won and a
+  controller changed through Reconfigure seemed to have no effect.
+- Learning a code with the `learn_command` action no longer pins the command
+  to a single send; repeat settings the command had are kept.
+- Labels: the integration is called AR Smart IR everywhere, and fields that
+  showed their raw key (`controller`, `power_sensor`,
+  `power_sensor_restore_state`, `device_class`, `source_names`) have
+  labels.
+- Removed: the options menu and the per-command screens of the previous
+  build, and replacing a codeset command's code from the options. Codes
+  already learned that way keep working.
 
 ## 1.8.1
 

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 from typing import Any
 import uuid
 
@@ -8,6 +10,8 @@ import voluptuous as vol
 
 from homeassistant import config_entries
 from homeassistant.const import CONF_NAME
+from homeassistant.data_entry_flow import section
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import selector
 
 from .const import (
@@ -15,18 +19,14 @@ from .const import (
     CONF_CONTROLLER,
     CONF_CONTROLLER_DATA,
     CONF_CONTROLLER_ENTITY,
+    CONF_CUSTOM_COMMANDS,
     CONF_DEFAULT_REPEAT_COUNT,
-    CONF_DEFAULT_REPEAT_DELAY,
     CONF_DELAY,
     CONF_DEVICE_CLASS,
     CONF_DEVICE_CODE,
     CONF_GO_BACK,
     CONF_HUMIDITY_SENSOR,
     CONF_INFRARED_ENTITY,
-    CONF_OVERRIDE_COMMAND,
-    CONF_OVERRIDE_REMOVE,
-    CONF_OVERRIDE_REPEAT_COUNT,
-    CONF_OVERRIDE_REPEAT_DELAY,
     CONF_PLATFORM,
     CONF_PASSIVE_MODE,
     CONF_POWER_SENSOR,
@@ -38,31 +38,31 @@ from .const import (
     TEMPERATURE_UNIT_OPTIONS,
     CONF_TEST_COMMAND,
     CONF_TEST_DEVICE,
-    CONF_USE_DEVICE_DEFAULT,
     DEFAULT_DEVICE_CLASS,
     DEFAULT_DELAY,
     DEFAULT_REPEAT_COUNT,
     DOMAIN,
     PLATFORM_TITLES,
     PLATFORMS,
-    CONF_LEARN_COMMAND,
-    CONF_LEARN_BROADLINK_ENTITY,
-    CONF_LEARN_TIMEOUT,
 )
 from .helpers import (
     async_load_device_data,
-    clear_command_repeat_at_path,
+    clear_all_command_repeats,
     command_path_to_key,
+    command_repeat_list,
+    detect_ir_code_encoding,
     flatten_command_paths,
-    get_command_repeat_at_path,
     get_command_value_at_path,
     infer_title,
     get_manufacturers,
     get_models_for_manufacturer,
-    parse_command_overrides,
+    normalize_ir_code,
+    parse_custom_commands,
     set_command_repeat_at_path,
 )
 from .controller import get_controller
+
+_LOGGER = logging.getLogger(__name__)
 
 CONTROLLERS = [
     "Broadlink",
@@ -318,13 +318,46 @@ def _build_compatibility_message(
     return "No test sent yet."
 
 
-# Values the old single-page options form saved into the options although
-# nothing reads them; dropped whenever a command's settings are saved.
-_OLD_COMMAND_FORM_KEYS = (
-    CONF_OVERRIDE_REPEAT_COUNT,
-    CONF_OVERRIDE_REPEAT_DELAY,
-    CONF_OVERRIDE_REMOVE,
-    CONF_LEARN_COMMAND,
+# Where a controller sends from, per controller. Each text kind has its own
+# options key so the form can label it ("MQTT topic", "LOOKin address", ...);
+# all of them are stored as controller_data.
+REMOTE_ENTITY_CONTROLLERS = ("Broadlink", "LinkNLink", "Xiaomi")
+TEXT_TARGET_FIELDS = {
+    "MQTT": "mqtt_topic",
+    "UFOR11": "mqtt_topic",
+    "LOOKin": "lookin_address",
+    "ESPHome": "esphome_service",
+    "Tuya": "tuya_target",
+}
+# Integrations whose remote entity can record IR codes.
+LEARNING_PLATFORMS = ("broadlink", "linknlink")
+RECORD_TIMEOUT = 30
+
+# Options form sections and the lists inside them.
+SECTION_REPEAT = "repeat_commands"
+SECTION_CUSTOM = "custom_commands"
+SECTION_SENSORS = "sensors"
+SECTION_ADVANCED = "advanced"
+FIELD_COMMAND_REPEATS = "command_repeats"
+FIELD_CUSTOM_LIST = "commands"
+
+# Settings the setup wizard (and Reconfigure) asks for. When Reconfigure saves,
+# these are dropped from the options so the values just entered are used.
+WIZARD_SETTINGS = (
+    CONF_NAME,
+    CONF_CONTROLLER,
+    CONF_CONTROLLER_DATA,
+    CONF_CONTROLLER_ENTITY,
+    CONF_INFRARED_ENTITY,
+    CONF_DELAY,
+    CONF_TEMPERATURE_SENSOR,
+    CONF_HUMIDITY_SENSOR,
+    CONF_POWER_SENSOR,
+    CONF_POWER_SENSOR_RESTORE_STATE,
+    CONF_PASSIVE_MODE,
+    CONF_TEMPERATURE_UNIT,
+    CONF_DEVICE_CLASS,
+    CONF_SOURCE_NAMES,
 )
 
 
@@ -340,7 +373,7 @@ def _repeat_count_selector():
     )
 
 
-def _repeat_delay_selector():
+def _delay_selector():
     return selector.NumberSelector(
         selector.NumberSelectorConfig(
             min=0,
@@ -352,21 +385,64 @@ def _repeat_delay_selector():
     )
 
 
-def _device_repeat_defaults(data: dict[str, Any]) -> tuple[int, float]:
-    """Return the (repeat_count, repeat_delay_secs) every command gets unless
-    it sets its own; an empty default delay means the delay between commands."""
+def _device_class_selector():
+    return selector.SelectSelector(
+        selector.SelectSelectorConfig(
+            options=["tv", "receiver", "speaker"],
+            mode=selector.SelectSelectorMode.DROPDOWN,
+            translation_key="device_class",
+        )
+    )
+
+
+def _as_int(value: Any, default: int) -> int:
     try:
-        count = max(1, int(data.get(CONF_DEFAULT_REPEAT_COUNT) or DEFAULT_REPEAT_COUNT))
+        return int(value)
     except (TypeError, ValueError):
-        count = DEFAULT_REPEAT_COUNT
-    delay = data.get(CONF_DEFAULT_REPEAT_DELAY)
-    if delay is None:
-        delay = data.get(CONF_DELAY, DEFAULT_DELAY)
+        return default
+
+
+def _as_float(value: Any, default: float) -> float:
     try:
-        delay = max(0.0, float(delay))
+        return float(value)
     except (TypeError, ValueError):
-        delay = DEFAULT_DELAY
-    return count, delay
+        return default
+
+
+def _command_key(typed: Any, keys: list[str]) -> str | None:
+    """The command a typed value names, or None.
+
+    "cool/low/24" is accepted for "cool / low / 24", unless a command is
+    really named with a slash (e.g. "play/pause").
+    """
+    text = str(typed or "").strip()
+    if text in keys:
+        return text
+    spaced = " / ".join(part.strip() for part in text.split("/"))
+    return spaced if spaced in keys else None
+
+
+def _learning_remote(hass, controller: str, target: str) -> str | None:
+    """The remote entity that can record codes for this entry, if any.
+
+    A Broadlink or LinkNLink controller records with its own remote. With the
+    Infrared controller, it is the Broadlink or LinkNLink remote on the same
+    device as the emitter (one RM4 exposes both).
+    """
+    if not target:
+        return None
+    registry = er.async_get(hass)
+    if controller in ("Broadlink", "LinkNLink") and target.startswith("remote."):
+        return target
+    if controller != "Infrared":
+        return None
+    emitter = registry.async_get(target)
+    if emitter is None or emitter.device_id is None:
+        return None
+    for entity in er.async_entries_for_device(registry, emitter.device_id):
+        if entity.domain == "remote" and entity.platform in LEARNING_PLATFORMS:
+            return entity.entity_id
+    return None
 
 
 class ARSmartIRConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -810,10 +886,18 @@ class ARSmartIRConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 data["unique_id"] = reconfigure_entry.data.get(
                     "unique_id", reconfigure_entry.unique_id
                 )
+                # The options win over the entry data, so drop the settings
+                # this wizard sets from them: the values just entered are used.
+                options = {
+                    key: value
+                    for key, value in reconfigure_entry.options.items()
+                    if key not in data and key not in WIZARD_SETTINGS
+                }
                 return self.async_update_reload_and_abort(
                     reconfigure_entry,
                     title=data[CONF_NAME],
                     data=data,
+                    options=options,
                 )
 
             data["unique_id"] = uuid.uuid4().hex
@@ -833,467 +917,532 @@ class ARSmartIRConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class ARSmartIROptionsFlow(config_entries.OptionsFlow):
-    """Options: a menu leading to the general settings or to one command.
+    """Options: one form, in sections.
 
-    A codeset can hold hundreds of commands (an AC has one per mode, fan
-    speed and temperature), so picking a command gets a screen of its own
-    instead of a dropdown at the bottom of the long settings form, and its
-    repeat settings are shown on the next screen for that command only.
+    Name and controller at the top, then Repeat commands (the device's count,
+    its delay and the commands with their own count), Custom commands (the
+    user's own commands, one button each), Sensors and Advanced. The two lists
+    are edited in place; nothing is saved until Submit. Custom commands
+    without a code are recorded after Submit, one by one.
     """
 
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
         self._config_entry = config_entry
-        self._learn_status: str = ""
-        self._draft_data: dict[str, Any] = {}
-        self._selected_command: str = ""
+        self._controller_shown: str | None = None
+        self._pending: dict[str, Any] = {}
+        self._queue: list[str] = []
+        self._queue_pos = 0
+        self._recorded: dict[str, str] = {}
+        self._previous_codes: dict[str, dict[str, Any]] = {}
+        self._learner: str | None = None
+        self._record_task: asyncio.Task | None = None
 
-    def _get_current_data(self) -> dict[str, Any]:
-        return {
-            **self._config_entry.data,
-            **self._config_entry.options,
-            **self._draft_data,
-        }
+    def _config(self) -> dict[str, Any]:
+        return {**self._config_entry.data, **self._config_entry.options}
 
-    async def _async_command_options(
-        self, data: dict[str, Any]
-    ) -> list[selector.SelectOptionDict]:
-        override_data = parse_command_overrides(data.get(CONF_COMMAND_OVERRIDES, {}))
-        device_data = await async_load_device_data(
-            data.get(CONF_DEVICE_CODE),
-            data.get(CONF_PLATFORM),
-        )
-        return [
-            selector.SelectOptionDict(
-                value=command_path_to_key(path),
-                label=(
-                    f"{command_path_to_key(path)} [saved]"
-                    if isinstance(get_command_value_at_path(override_data, path), dict)
-                    else command_path_to_key(path)
-                ),
-            )
+    async def _async_codeset(self, config: dict[str, Any]) -> tuple[list[str], str]:
+        """The codeset's command keys, and the line describing the device."""
+        platform = config.get(CONF_PLATFORM)
+        device_data = await async_load_device_data(config.get(CONF_DEVICE_CODE), platform)
+        keys = [
+            command_path_to_key(path)
             for path in flatten_command_paths(device_data.get("commands", {}))
         ]
-
-    # ── step: init (menu) ─────────────────────────────────────────────────────
-
-    async def async_step_init(self, user_input=None):
-        return self.async_show_menu(
-            step_id="init",
-            menu_options=["general", "command"],
-        )
-
-    # ── step: general settings ────────────────────────────────────────────────
-
-    async def async_step_general(self, user_input=None):
-        errors: dict[str, str] = {}
-        data = self._get_current_data()
-
-        if user_input is not None:
-            if user_input.get(CONF_CONTROLLER) != data.get(CONF_CONTROLLER):
-                # Another controller takes another kind of target: show the
-                # form again with that controller's fields.
-                updated_data = {**data, **user_input}
-                updated_data[CONF_CONTROLLER_DATA] = ""
-                updated_data.pop(CONF_CONTROLLER_ENTITY, None)
-                updated_data.pop(CONF_INFRARED_ENTITY, None)
-                self._draft_data = updated_data
-                return self._show_general_form(updated_data, errors)
-
-            cleaned_input = dict(user_input)
-
-            if _controller_target_conflict(cleaned_input):
-                errors["base"] = "controller_target_conflict"
-                return self._show_general_form({**data, **cleaned_input}, errors)
-
-            _normalize_controller_target(cleaned_input)
-
-            if not cleaned_input.get(CONF_CONTROLLER_DATA):
-                error_key = _controller_target_error_key(
-                    cleaned_input.get(CONF_CONTROLLER, "")
-                )
-                errors[error_key] = "required"
-                return self._show_general_form({**data, **cleaned_input}, errors)
-
-            cleaned_input[CONF_DEFAULT_REPEAT_COUNT] = int(
-                cleaned_input.get(CONF_DEFAULT_REPEAT_COUNT, DEFAULT_REPEAT_COUNT)
+        models = device_data.get("supportedModels") or []
+        model = models[0] if isinstance(models, list) and models else ""
+        device = " · ".join(
+            part
+            for part in (
+                PLATFORM_TITLES.get(platform, str(platform)),
+                f"{device_data.get('manufacturer', '')} {model}".strip(),
             )
-
-            # This form owns every option except the per-command ones, which
-            # the command step saves; keep those as they are.
-            options = {
-                key: value
-                for key, value in self._config_entry.options.items()
-                if key in (CONF_COMMAND_OVERRIDES, CONF_OVERRIDE_COMMAND)
-            }
-            options.update(cleaned_input)
-            self._draft_data = {}
-            return self.async_create_entry(title="", data=options)
-
-        return self._show_general_form(data, errors)
-
-    def _show_general_form(self, data: dict[str, Any], errors: dict[str, str]):
-        return self.async_show_form(
-            step_id="general",
-            data_schema=vol.Schema(self._build_general_schema(data)),
-            errors=errors,
+            if part
         )
+        return keys, f"{device} (code {config.get(CONF_DEVICE_CODE)})"
 
-    # ── step: command (pick one) ──────────────────────────────────────────────
+    # ── values shown in the form ──────────────────────────────────────────────
 
-    async def async_step_command(self, user_input=None):
-        errors: dict[str, str] = {}
-        data = self._get_current_data()
-        command_options = await self._async_command_options(data)
-        if not command_options:
-            return self.async_abort(reason="no_commands")
-        command_keys = [option["value"] for option in command_options]
-
-        if user_input is not None:
-            # The picker takes typed text so the long list can be searched;
-            # only a command from the list can be configured. "cool/low/25"
-            # is accepted for "cool / low / 25", unless a command is really
-            # named with a slash (e.g. "play/pause").
-            typed = (user_input.get(CONF_OVERRIDE_COMMAND) or "").strip()
-            selected = typed
-            if selected not in command_keys:
-                selected = " / ".join(part.strip() for part in typed.split("/"))
-            if selected in command_keys:
-                self._selected_command = selected
-                return await self.async_step_command_edit()
-            errors[CONF_OVERRIDE_COMMAND] = "invalid_command"
-
-        default = data.get(CONF_OVERRIDE_COMMAND)
-        if default not in command_keys:
-            default = command_keys[0]
-
-        return self.async_show_form(
-            step_id="command",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(
-                        CONF_OVERRIDE_COMMAND,
-                        default=default,
-                    ): selector.SelectSelector(
-                        selector.SelectSelectorConfig(
-                            options=command_options,
-                            mode=selector.SelectSelectorMode.DROPDOWN,
-                            custom_value=True,
-                        )
-                    ),
-                }
-            ),
-            errors=errors,
-        )
-
-    # ── step: command_edit (repeat settings of the picked command) ────────────
-
-    async def async_step_command_edit(self, user_input=None):
-        selected = self._selected_command
-        if not selected:
-            return await self.async_step_command()
-
-        path = tuple(selected.split(" / "))
-        data = self._get_current_data()
-        override_data = parse_command_overrides(data.get(CONF_COMMAND_OVERRIDES, {}))
-        own_repeat = get_command_repeat_at_path(override_data, path)
-        default_count, default_delay = _device_repeat_defaults(data)
-
-        if user_input is not None:
-            if user_input.get(CONF_LEARN_COMMAND):
-                # Pre-select this command in the learn step's dropdown.
-                self._pending_override_command = selected
-                return await self.async_step_learn()
-
-            if user_input.get(CONF_USE_DEVICE_DEFAULT, False):
-                override_data = clear_command_repeat_at_path(override_data, path)
-            else:
-                override_data = set_command_repeat_at_path(
-                    override_data,
-                    path,
-                    int(user_input.get(CONF_OVERRIDE_REPEAT_COUNT, default_count)),
-                    float(user_input.get(CONF_OVERRIDE_REPEAT_DELAY, default_delay)),
-                )
-
-            options = {
-                key: value
-                for key, value in self._config_entry.options.items()
-                if key not in _OLD_COMMAND_FORM_KEYS
-            }
-            options[CONF_COMMAND_OVERRIDES] = override_data
-            options[CONF_OVERRIDE_COMMAND] = selected
-            return self.async_create_entry(title="", data=options)
-
-        shown_count, shown_delay = own_repeat or (default_count, default_delay)
-        return self.async_show_form(
-            step_id="command_edit",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(
-                        CONF_USE_DEVICE_DEFAULT,
-                        default=own_repeat is None,
-                    ): bool,
-                    vol.Required(
-                        CONF_OVERRIDE_REPEAT_COUNT,
-                        default=shown_count,
-                    ): _repeat_count_selector(),
-                    vol.Required(
-                        CONF_OVERRIDE_REPEAT_DELAY,
-                        default=shown_delay,
-                    ): _repeat_delay_selector(),
-                    vol.Required(CONF_LEARN_COMMAND, default=False): bool,
-                }
-            ),
-            description_placeholders={
-                "command": selected,
-                "current": (
-                    "follows the device default"
-                    if own_repeat is None
-                    else f"own setting, sent {own_repeat[0]} time(s), "
-                    f"{own_repeat[1]:g} s apart"
-                ),
-                "default": f"sent {default_count} time(s), {default_delay:g} s apart",
-            },
-        )
-
-    # ── step: learn ───────────────────────────────────────────────────────────
-
-    async def async_step_learn(self, user_input=None):
-        """
-        UI step that lets the user pick a command, point their physical remote
-        at the Broadlink device, and capture a live IR code which is then saved
-        as a command override.
-        """
-        errors: dict[str, str] = {}
-        data = self._get_current_data()
-
-        # Build command list for the dropdown.
-        device_data = await async_load_device_data(
-            data.get(CONF_DEVICE_CODE),
-            data.get(CONF_PLATFORM),
-        )
-        command_paths = flatten_command_paths(device_data.get("commands", {}))
-        override_data = parse_command_overrides(data.get(CONF_COMMAND_OVERRIDES, {}))
-        command_options = [
-            selector.SelectOptionDict(
-                value=command_path_to_key(path),
-                label=(
-                    f"{command_path_to_key(path)} [learned]"
-                    if isinstance(get_command_value_at_path(override_data, path), dict)
-                    else command_path_to_key(path)
-                ),
-            )
-            for path in command_paths
+    def _initial_values(self) -> dict[str, Any]:
+        config = self._config()
+        customs = parse_custom_commands(config.get(CONF_CUSTOM_COMMANDS))
+        repeats = command_repeat_list(config.get(CONF_COMMAND_OVERRIDES)) + [
+            {"command": command["name"], "times": command["repeat_count"]}
+            for command in customs
+            if command.get("repeat_count")
         ]
+        controller = config.get(CONF_CONTROLLER, CONTROLLERS[0])
+        if controller == "Infrared":
+            target = config.get(CONF_INFRARED_ENTITY) or config.get(CONF_CONTROLLER_DATA)
+        else:
+            target = config.get(CONF_CONTROLLER_DATA)
+        return {
+            CONF_NAME: config.get(CONF_NAME, self._config_entry.title),
+            CONF_CONTROLLER: controller,
+            "target": target or "",
+            CONF_DEFAULT_REPEAT_COUNT: _as_int(config.get(CONF_DEFAULT_REPEAT_COUNT), DEFAULT_REPEAT_COUNT),
+            CONF_DELAY: _as_float(config.get(CONF_DELAY), DEFAULT_DELAY),
+            FIELD_COMMAND_REPEATS: repeats,
+            FIELD_CUSTOM_LIST: [
+                {"name": command["name"], "code": command["code"]} for command in customs
+            ],
+            CONF_TEMPERATURE_SENSOR: config.get(CONF_TEMPERATURE_SENSOR),
+            CONF_HUMIDITY_SENSOR: config.get(CONF_HUMIDITY_SENSOR),
+            CONF_POWER_SENSOR: config.get(CONF_POWER_SENSOR),
+            CONF_POWER_SENSOR_RESTORE_STATE: bool(config.get(CONF_POWER_SENSOR_RESTORE_STATE, False)),
+            CONF_PASSIVE_MODE: bool(config.get(CONF_PASSIVE_MODE, False)),
+            CONF_TEMPERATURE_UNIT: config.get(CONF_TEMPERATURE_UNIT, TEMPERATURE_UNIT_AUTO),
+            CONF_DEVICE_CLASS: config.get(CONF_DEVICE_CLASS) or DEFAULT_DEVICE_CLASS,
+            CONF_SOURCE_NAMES: _source_names_default(config.get(CONF_SOURCE_NAMES)),
+        }
 
-        # Default the dropdown to whatever was selected on the init page.
-        preselected = getattr(self, "_pending_override_command", None) or (
-            command_options[0]["value"] if command_options else ""
+    def _values_from_input(self, user_input: dict[str, Any]) -> dict[str, Any]:
+        controller = user_input.get(CONF_CONTROLLER) or CONTROLLERS[0]
+        values: dict[str, Any] = {
+            CONF_NAME: str(user_input.get(CONF_NAME) or "").strip(),
+            CONF_CONTROLLER: controller,
+            "tuya_conflict": False,
+        }
+        if controller == "Infrared":
+            target = user_input.get(CONF_INFRARED_ENTITY)
+        elif controller in REMOTE_ENTITY_CONTROLLERS:
+            target = user_input.get(CONF_CONTROLLER_ENTITY)
+        elif controller == "Tuya":
+            entity = str(user_input.get(CONF_CONTROLLER_ENTITY) or "").strip()
+            text = str(user_input.get(TEXT_TARGET_FIELDS["Tuya"]) or "").strip()
+            values["tuya_conflict"] = bool(entity and text)
+            target = text or entity
+        else:
+            target = user_input.get(TEXT_TARGET_FIELDS.get(controller, CONF_CONTROLLER_DATA))
+        values["target"] = str(target or "").strip()
+
+        repeat = user_input.get(SECTION_REPEAT) or {}
+        values[CONF_DEFAULT_REPEAT_COUNT] = _as_int(
+            repeat.get(CONF_DEFAULT_REPEAT_COUNT), DEFAULT_REPEAT_COUNT
         )
+        values[CONF_DELAY] = _as_float(repeat.get(CONF_DELAY), DEFAULT_DELAY)
+        values[FIELD_COMMAND_REPEATS] = list(repeat.get(FIELD_COMMAND_REPEATS) or [])
 
-        if user_input is not None:
-            # "Go back" link returns to the main options page.
-            if user_input.get(CONF_GO_BACK):
-                return await self.async_step_init()
+        custom = user_input.get(SECTION_CUSTOM) or {}
+        values[FIELD_CUSTOM_LIST] = list(custom.get(FIELD_CUSTOM_LIST) or [])
 
-            selected_key: str = user_input.get(CONF_OVERRIDE_COMMAND, preselected)
-            broadlink_entity: str = user_input.get(CONF_LEARN_BROADLINK_ENTITY, "")
-            timeout: int = int(user_input.get(CONF_LEARN_TIMEOUT, 30))
-
-            if not broadlink_entity:
-                errors[CONF_LEARN_BROADLINK_ENTITY] = "required"
-            else:
-                # Trigger learning via the service handler in __init__.py.
-                try:
-                    await self.hass.services.async_call(
-                        DOMAIN,
-                        "learn_command",
-                        {
-                            "entry_id": self._config_entry.entry_id,
-                            "command_path": selected_key,
-                            "broadlink_entity": broadlink_entity,
-                            "timeout": timeout,
-                        },
-                        blocking=True,
-                    )
-                except Exception as err:  # noqa: BLE001
-                    self._learn_status = f"Learn failed: {err}"
-                    errors["base"] = "learn_failed"
-                else:
-                    # The service already saved the override and reloaded the
-                    # entry.  Let the user know and stay on the learn step so
-                    # they can learn another command if they want.
-                    self._learn_status = (
-                        f"✅ Learned and saved: {selected_key}. "
-                        "Point your remote and learn another, or go back to finish."
-                    )
-                    preselected = selected_key
-
-        return self.async_show_form(
-            step_id="learn",
-            data_schema=vol.Schema(
-                self._build_learn_schema(command_options, preselected, data)
-            ),
-            errors=errors,
-            description_placeholders={
-                "status": self._learn_status or (
-                    "Select a command, choose your Broadlink or LinkNLink remote "
-                    "entity, then click Learn. When prompted, point your physical "
-                    "remote at the hub and press the button you want to capture."
-                ),
-            },
+        sensors = user_input.get(SECTION_SENSORS) or {}
+        advanced = user_input.get(SECTION_ADVANCED) or {}
+        values[CONF_TEMPERATURE_SENSOR] = sensors.get(CONF_TEMPERATURE_SENSOR) or None
+        values[CONF_HUMIDITY_SENSOR] = sensors.get(CONF_HUMIDITY_SENSOR) or None
+        values[CONF_POWER_SENSOR] = sensors.get(CONF_POWER_SENSOR) or None
+        values[CONF_POWER_SENSOR_RESTORE_STATE] = bool(
+            sensors.get(CONF_POWER_SENSOR_RESTORE_STATE, False)
         )
+        values[CONF_PASSIVE_MODE] = bool(advanced.get(CONF_PASSIVE_MODE, False))
+        values[CONF_TEMPERATURE_UNIT] = advanced.get(CONF_TEMPERATURE_UNIT, TEMPERATURE_UNIT_AUTO)
+        values[CONF_DEVICE_CLASS] = advanced.get(CONF_DEVICE_CLASS) or DEFAULT_DEVICE_CLASS
+        values[CONF_SOURCE_NAMES] = advanced.get(CONF_SOURCE_NAMES) or ""
+        return values
 
-    # ── schema builders ───────────────────────────────────────────────────────
+    # ── the form ──────────────────────────────────────────────────────────────
 
-    def _build_general_schema(self, data: dict[str, Any]) -> dict[Any, Any]:
+    def _build_schema(
+        self,
+        values: dict[str, Any],
+        platform: str | None,
+        command_keys: list[str],
+    ) -> vol.Schema:
+        controller = values[CONF_CONTROLLER]
+        target = values.get("target") or ""
         schema: dict[Any, Any] = {
-            vol.Optional(
-                CONF_NAME,
-                default=data.get(CONF_NAME, self._config_entry.title),
-            ): str,
-            vol.Optional(
-                CONF_CONTROLLER,
-                default=data.get(CONF_CONTROLLER, CONTROLLERS[0]),
-            ): selector.SelectSelector(
+            vol.Required(CONF_NAME, default=values[CONF_NAME]): selector.TextSelector(),
+            vol.Required(CONF_CONTROLLER, default=controller): selector.SelectSelector(
                 selector.SelectSelectorConfig(
                     options=CONTROLLERS,
                     mode=selector.SelectSelectorMode.DROPDOWN,
                 )
             ),
         }
-
-        controller = data.get(CONF_CONTROLLER, CONTROLLERS[0])
         if controller == "Infrared":
+            schema[_optional_entity_key(CONF_INFRARED_ENTITY, target)] = _infrared_entity_selector()
+        elif controller in REMOTE_ENTITY_CONTROLLERS:
+            schema[_optional_entity_key(CONF_CONTROLLER_ENTITY, target)] = _remote_entity_selector()
+        elif controller == "Tuya":
+            remote_target = target if _looks_like_remote_entity(target) else ""
+            schema[_optional_entity_key(CONF_CONTROLLER_ENTITY, remote_target)] = _remote_entity_selector()
             schema[
-                _optional_entity_key(
-                    CONF_INFRARED_ENTITY,
-                    data.get(CONF_INFRARED_ENTITY)
-                    or data.get(CONF_CONTROLLER_DATA, ""),
+                vol.Optional(
+                    TEXT_TARGET_FIELDS["Tuya"],
+                    default="" if remote_target else target,
                 )
-            ] = _infrared_entity_selector()
+            ] = _controller_data_field(controller)
         else:
-            _add_controller_target_fields(schema, controller, data)
-
-        if data.get(CONF_PLATFORM) == "climate":
-            schema[
-                _optional_entity_field(CONF_TEMPERATURE_SENSOR, data)
-            ] = _temperature_sensor_selector()
-            schema[
-                _optional_entity_field(CONF_HUMIDITY_SENSOR, data)
-            ] = _humidity_sensor_selector()
-            schema[
-                _optional_entity_field(CONF_POWER_SENSOR, data)
-            ] = _entity_selector()
             schema[
                 vol.Optional(
-                    CONF_POWER_SENSOR_RESTORE_STATE,
-                    default=data.get(CONF_POWER_SENSOR_RESTORE_STATE, False),
+                    TEXT_TARGET_FIELDS.get(controller, CONF_CONTROLLER_DATA),
+                    default=target,
                 )
-            ] = bool
-            schema[
-                vol.Optional(
-                    CONF_PASSIVE_MODE,
-                    default=data.get(CONF_PASSIVE_MODE, False),
-                )
-            ] = bool
-            schema[
-                vol.Optional(
-                    CONF_TEMPERATURE_UNIT,
-                    default=data.get(CONF_TEMPERATURE_UNIT, TEMPERATURE_UNIT_AUTO),
-                )
-            ] = _temperature_unit_selector()
+            ] = _controller_data_field(controller)
 
-        if data.get(CONF_PLATFORM) in {"fan", "light", "media_player"}:
-            schema[
-                _optional_entity_field(CONF_POWER_SENSOR, data)
-            ] = _entity_selector()
-
-        if data.get(CONF_PLATFORM) == "media_player":
-            schema[
-                vol.Optional(
-                    CONF_DEVICE_CLASS,
-                    default=data.get(CONF_DEVICE_CLASS, DEFAULT_DEVICE_CLASS),
-                )
-            ] = str
-            schema[
-                vol.Optional(
-                    CONF_SOURCE_NAMES,
-                    default=_source_names_default(data.get(CONF_SOURCE_NAMES)),
-                )
-            ] = selector.TextSelector(
-                selector.TextSelectorConfig(
-                    multiline=True,
-                )
-            )
-
-        schema[
-            vol.Optional(
-                CONF_DELAY,
-                default=data.get(CONF_DELAY, DEFAULT_DELAY),
-            )
-        ] = vol.Coerce(float)
-
-        schema[
+        repeat_schema = {
             vol.Required(
-                CONF_DEFAULT_REPEAT_COUNT,
-                default=_device_repeat_defaults(data)[0],
-            )
-        ] = _repeat_count_selector()
-        schema[
+                CONF_DEFAULT_REPEAT_COUNT, default=values[CONF_DEFAULT_REPEAT_COUNT]
+            ): _repeat_count_selector(),
+            vol.Required(CONF_DELAY, default=values[CONF_DELAY]): _delay_selector(),
             vol.Optional(
-                CONF_DEFAULT_REPEAT_DELAY,
-                description={"suggested_value": data.get(CONF_DEFAULT_REPEAT_DELAY)},
-            )
-        ] = _repeat_delay_selector()
-
-        return schema
-
-    def _build_learn_schema(
-        self,
-        command_options: list[Any],
-        preselected: str,
-        data: dict[str, Any],
-    ) -> dict[Any, Any]:
-        """Schema for the learn step form."""
-        # Pre-fill the remote entity from the device's controller_data if the
-        # controller is Broadlink or LinkNLink (both expose a learn-capable
-        # remote entity), so the user doesn't have to type it.
-        default_broadlink = ""
-        if data.get(CONF_CONTROLLER) in ("Broadlink", "LinkNLink"):
-            default_broadlink = data.get(CONF_CONTROLLER_DATA, "")
-
-        schema: dict[Any, Any] = {
-            vol.Optional(
-                CONF_OVERRIDE_COMMAND,
-                default=preselected,
-            ): selector.SelectSelector(
-                selector.SelectSelectorConfig(
-                    options=command_options,
-                    mode=selector.SelectSelectorMode.DROPDOWN,
+                FIELD_COMMAND_REPEATS, default=values[FIELD_COMMAND_REPEATS]
+            ): selector.ObjectSelector(
+                selector.ObjectSelectorConfig(
+                    fields={
+                        "command": {
+                            "selector": {
+                                "select": {
+                                    "options": command_keys,
+                                    "custom_value": True,
+                                    "mode": "dropdown",
+                                    "sort": False,
+                                }
+                            },
+                            "required": True,
+                        },
+                        "times": {
+                            "selector": {
+                                "number": {"min": 1, "max": 20, "step": 1, "mode": "box"}
+                            },
+                            "required": True,
+                            "default": 2,
+                        },
+                    },
+                    multiple=True,
+                    label_field="command",
+                    description_field="times",
+                    translation_key=FIELD_COMMAND_REPEATS,
                 )
             ),
         }
+        schema[vol.Required(SECTION_REPEAT)] = section(
+            vol.Schema(repeat_schema), {"collapsed": False}
+        )
 
-        if default_broadlink:
-            schema[
-                vol.Optional(
-                    CONF_LEARN_BROADLINK_ENTITY,
-                    default=default_broadlink,
+        custom_schema = {
+            vol.Optional(
+                FIELD_CUSTOM_LIST, default=values[FIELD_CUSTOM_LIST]
+            ): selector.ObjectSelector(
+                selector.ObjectSelectorConfig(
+                    fields={
+                        "name": {"selector": {"text": {}}, "required": True},
+                        "code": {"selector": {"text": {"multiline": True}}, "required": False},
+                    },
+                    multiple=True,
+                    label_field="name",
+                    description_field="code",
+                    translation_key=SECTION_CUSTOM,
                 )
-            ] = selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="remote")
+            ),
+        }
+        schema[vol.Required(SECTION_CUSTOM)] = section(
+            vol.Schema(custom_schema), {"collapsed": False}
+        )
+
+        sensors_schema: dict[Any, Any] = {}
+        if platform == "climate":
+            sensors_schema[
+                vol.Optional(
+                    CONF_TEMPERATURE_SENSOR,
+                    description={"suggested_value": values[CONF_TEMPERATURE_SENSOR]},
+                )
+            ] = _temperature_sensor_selector()
+            sensors_schema[
+                vol.Optional(
+                    CONF_HUMIDITY_SENSOR,
+                    description={"suggested_value": values[CONF_HUMIDITY_SENSOR]},
+                )
+            ] = _humidity_sensor_selector()
+        sensors_schema[
+            vol.Optional(
+                CONF_POWER_SENSOR,
+                description={"suggested_value": values[CONF_POWER_SENSOR]},
             )
+        ] = _entity_selector()
+        if platform == "climate":
+            sensors_schema[
+                vol.Required(
+                    CONF_POWER_SENSOR_RESTORE_STATE,
+                    default=values[CONF_POWER_SENSOR_RESTORE_STATE],
+                )
+            ] = bool
+        schema[vol.Required(SECTION_SENSORS)] = section(
+            vol.Schema(sensors_schema), {"collapsed": True}
+        )
+
+        advanced_schema: dict[Any, Any] = {}
+        if platform == "climate":
+            advanced_schema[
+                vol.Required(CONF_PASSIVE_MODE, default=values[CONF_PASSIVE_MODE])
+            ] = bool
+            advanced_schema[
+                vol.Required(CONF_TEMPERATURE_UNIT, default=values[CONF_TEMPERATURE_UNIT])
+            ] = _temperature_unit_selector()
+        if platform == "media_player":
+            advanced_schema[
+                vol.Required(CONF_DEVICE_CLASS, default=values[CONF_DEVICE_CLASS])
+            ] = _device_class_selector()
+            advanced_schema[
+                vol.Optional(CONF_SOURCE_NAMES, default=values[CONF_SOURCE_NAMES])
+            ] = selector.TextSelector(selector.TextSelectorConfig(multiline=True))
+        if advanced_schema:
+            schema[vol.Required(SECTION_ADVANCED)] = section(
+                vol.Schema(advanced_schema), {"collapsed": True}
+            )
+
+        return vol.Schema(schema)
+
+    async def _async_show_form(
+        self,
+        values: dict[str, Any],
+        errors: dict[str, str],
+    ):
+        config = self._config()
+        command_keys, device = await self._async_codeset(config)
+        custom_names = [
+            str(item.get("name") or "").strip()
+            for item in values[FIELD_CUSTOM_LIST]
+            if str(item.get("name") or "").strip()
+        ]
+        return self.async_show_form(
+            step_id="init",
+            data_schema=self._build_schema(
+                values, config.get(CONF_PLATFORM), command_keys + custom_names
+            ),
+            errors=errors,
+            description_placeholders={
+                "name": values[CONF_NAME] or self._config_entry.title,
+                "device": device,
+            },
+        )
+
+    # ── step: init (the form) ─────────────────────────────────────────────────
+
+    async def async_step_init(self, user_input=None):
+        if user_input is None:
+            values = self._initial_values()
+            self._controller_shown = values[CONF_CONTROLLER]
+            return await self._async_show_form(values, {})
+
+        values = self._values_from_input(user_input)
+
+        if values[CONF_CONTROLLER] != self._controller_shown:
+            # Another controller sends from another kind of target: show the
+            # form again with that controller's field.
+            self._controller_shown = values[CONF_CONTROLLER]
+            values["target"] = ""
+            return await self._async_show_form(values, {"base": "controller_changed"})
+
+        config = self._config()
+        codeset_keys, _device = await self._async_codeset(config)
+        error = self._validate(values, codeset_keys)
+        if error:
+            return await self._async_show_form(values, {"base": error})
+
+        options, queue = self._build_options(values, config, codeset_keys)
+        if not queue:
+            return self.async_create_entry(title="", data=options)
+
+        self._learner = _learning_remote(
+            self.hass, values[CONF_CONTROLLER], values["target"]
+        )
+        if self._learner is None:
+            return await self._async_show_form(values, {"base": "no_learning_remote"})
+
+        self._pending = options
+        self._queue = queue
+        self._queue_pos = 0
+        self._recorded = {}
+        self._previous_codes = {
+            command["name"]: command
+            for command in parse_custom_commands(config.get(CONF_CUSTOM_COMMANDS))
+            if command.get("code")
+        }
+        return await self.async_step_record()
+
+    def _validate(self, values: dict[str, Any], codeset_keys: list[str]) -> str | None:
+        """The error key for the first problem in the form, or None."""
+        if not values[CONF_NAME]:
+            return "name_required"
+        if values.get("tuya_conflict"):
+            return "controller_target_conflict"
+        if not values["target"]:
+            return "target_required"
+
+        lowered_codeset = {key.lower() for key in codeset_keys}
+        custom_names: list[str] = []
+        for item in values[FIELD_CUSTOM_LIST]:
+            name = str(item.get("name") or "").strip()
+            code = str(item.get("code") or "").strip()
+            if not name:
+                return "custom_name_missing"
+            if "/" in name:
+                return "custom_name_slash"
+            if name.lower() in (known.lower() for known in custom_names):
+                return "custom_name_duplicate"
+            if name.lower() in lowered_codeset:
+                return "custom_name_taken"
+            if code and detect_ir_code_encoding(code) is None:
+                return "custom_code_invalid"
+            custom_names.append(name)
+
+        seen: set[str] = set()
+        for item in values[FIELD_COMMAND_REPEATS]:
+            key = _command_key(item.get("command"), codeset_keys + custom_names)
+            if key is None:
+                return "repeat_command_unknown"
+            if key in seen:
+                return "repeat_command_duplicate"
+            times = _as_int(item.get("times"), 0)
+            if not 1 <= times <= 20:
+                return "repeat_times_invalid"
+            seen.add(key)
+        return None
+
+    def _build_options(
+        self,
+        values: dict[str, Any],
+        config: dict[str, Any],
+        codeset_keys: list[str],
+    ) -> tuple[dict[str, Any], list[str]]:
+        """The options to save, and the custom commands still to record."""
+        controller = values[CONF_CONTROLLER]
+        target = values["target"]
+        target_fields: dict[str, Any] = {CONF_CONTROLLER: controller}
+        if controller == "Infrared":
+            target_fields[CONF_INFRARED_ENTITY] = target
+        elif controller in REMOTE_ENTITY_CONTROLLERS:
+            target_fields[CONF_CONTROLLER_ENTITY] = target
         else:
-            schema[
-                vol.Optional(CONF_LEARN_BROADLINK_ENTITY)
-            ] = selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="remote")
+            target_fields[CONF_CONTROLLER_DATA] = target
+        _normalize_controller_target(target_fields)
+
+        platform = config.get(CONF_PLATFORM)
+        options: dict[str, Any] = {
+            CONF_NAME: values[CONF_NAME],
+            **target_fields,
+            CONF_DEFAULT_REPEAT_COUNT: values[CONF_DEFAULT_REPEAT_COUNT],
+            CONF_DELAY: values[CONF_DELAY],
+            # Cleared fields are saved as None so they also clear what the
+            # setup wizard stored.
+            CONF_POWER_SENSOR: values[CONF_POWER_SENSOR],
+        }
+        if platform == "climate":
+            options[CONF_TEMPERATURE_SENSOR] = values[CONF_TEMPERATURE_SENSOR]
+            options[CONF_HUMIDITY_SENSOR] = values[CONF_HUMIDITY_SENSOR]
+            options[CONF_POWER_SENSOR_RESTORE_STATE] = bool(
+                values[CONF_POWER_SENSOR] and values[CONF_POWER_SENSOR_RESTORE_STATE]
+            )
+            options[CONF_PASSIVE_MODE] = values[CONF_PASSIVE_MODE]
+            options[CONF_TEMPERATURE_UNIT] = values[CONF_TEMPERATURE_UNIT]
+        if platform == "media_player":
+            options[CONF_DEVICE_CLASS] = values[CONF_DEVICE_CLASS]
+            options[CONF_SOURCE_NAMES] = values[CONF_SOURCE_NAMES]
+
+        custom_names = [
+            str(item.get("name") or "").strip() for item in values[FIELD_CUSTOM_LIST]
+        ]
+        repeats: dict[str, int] = {}
+        for item in values[FIELD_COMMAND_REPEATS]:
+            key = _command_key(item.get("command"), codeset_keys + custom_names)
+            if key is not None:
+                repeats[key] = _as_int(item.get("times"), DEFAULT_REPEAT_COUNT)
+
+        # One delay for everything: a command's own delay is not kept.
+        overrides = clear_all_command_repeats(config.get(CONF_COMMAND_OVERRIDES))
+        for key, times in repeats.items():
+            if key in codeset_keys:
+                overrides = set_command_repeat_at_path(
+                    overrides, tuple(key.split(" / ")), times
+                )
+        options[CONF_COMMAND_OVERRIDES] = overrides
+
+        customs: list[dict[str, Any]] = []
+        queue: list[str] = []
+        for item in values[FIELD_CUSTOM_LIST]:
+            name = str(item.get("name") or "").strip()
+            code = str(item.get("code") or "").strip()
+            command: dict[str, Any] = {"name": name}
+            if code:
+                encoding = detect_ir_code_encoding(code) or "Base64"
+                command["code"] = normalize_ir_code(code, encoding)
+                command["encoding"] = encoding
+            else:
+                command["code"] = ""
+                command["encoding"] = "Base64"
+                queue.append(name)
+            if name in repeats:
+                command["repeat_count"] = repeats[name]
+            customs.append(command)
+        options[CONF_CUSTOM_COMMANDS] = customs
+        return options, queue
+
+    # ── steps: record the custom commands that have no code ──────────────────
+
+    def _record_placeholders(self) -> dict[str, str]:
+        state = self.hass.states.get(self._learner) if self._learner else None
+        return {
+            "name": self._queue[self._queue_pos] if self._queue_pos < len(self._queue) else "",
+            "remote": state.name if state is not None else (self._learner or ""),
+            "position": str(self._queue_pos + 1),
+            "total": str(len(self._queue)),
+        }
+
+    async def async_step_record(self, user_input=None):
+        if self._record_task is None:
+            from . import _async_broadlink_learn
+
+            self._record_task = self.hass.async_create_task(
+                _async_broadlink_learn(self.hass, self._learner, RECORD_TIMEOUT)
+            )
+        if not self._record_task.done():
+            return self.async_show_progress(
+                step_id="record",
+                progress_action="record",
+                progress_task=self._record_task,
+                description_placeholders=self._record_placeholders(),
             )
 
-        schema[
-            vol.Optional(CONF_LEARN_TIMEOUT, default=30)
-        ] = vol.All(vol.Coerce(int), vol.Range(min=5, max=120))
+        task, self._record_task = self._record_task, None
+        try:
+            code = task.result()
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("AR Smart IR: recording a custom command failed: %s", err)
+            return self.async_show_progress_done(next_step_id="record_failed")
 
-        schema[vol.Optional(CONF_GO_BACK, default=False)] = bool
+        self._recorded[self._queue[self._queue_pos]] = code
+        self._queue_pos += 1
+        if self._queue_pos < len(self._queue):
+            return self.async_show_progress_done(next_step_id="record")
+        return self.async_show_progress_done(next_step_id="record_finish")
 
-        return schema
+    async def async_step_record_failed(self, user_input=None):
+        return self.async_show_menu(
+            step_id="record_failed",
+            menu_options=["record", "record_skip"],
+            description_placeholders=self._record_placeholders(),
+        )
+
+    async def async_step_record_skip(self, user_input=None):
+        self._queue_pos += 1
+        if self._queue_pos < len(self._queue):
+            return await self.async_step_record()
+        return await self.async_step_record_finish()
+
+    async def async_step_record_finish(self, user_input=None):
+        customs = []
+        for command in self._pending.get(CONF_CUSTOM_COMMANDS, []):
+            if not command.get("code"):
+                name = command["name"]
+                if name in self._recorded:
+                    command = {**command, "code": self._recorded[name], "encoding": "Base64"}
+                elif name in self._previous_codes:
+                    # Skipped while re-recording: keep the code it had.
+                    previous = self._previous_codes[name]
+                    command = {**command, "code": previous["code"], "encoding": previous["encoding"]}
+                else:
+                    # A new command that was skipped is not saved.
+                    continue
+            customs.append(command)
+        self._pending[CONF_CUSTOM_COMMANDS] = customs
+        return self.async_create_entry(title="", data=self._pending)

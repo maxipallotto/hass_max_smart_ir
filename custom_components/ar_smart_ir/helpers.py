@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import aiofiles
+import base64
+import binascii
 import json
 import logging
 import os
 from typing import Any
+
+from .const import DOMAIN
 
 
 _LOGGER = logging.getLogger(__name__)
@@ -251,10 +255,11 @@ def set_command_repeat_at_path(
     overrides: dict[str, Any],
     path: tuple[str, ...],
     repeat_count: int,
-    repeat_delay_secs: float,
+    repeat_delay_secs: float | None = None,
 ) -> dict[str, Any]:
-    """Give the command at ``path`` its own repeat count and delay.
+    """Give the command at ``path`` its own repeat count (and delay, if given).
 
+    Without a delay the command uses the device's delay between sends.
     Unlike set_command_override_at_path, a learned code or a sequence already
     saved for the command is kept.
     """
@@ -264,7 +269,8 @@ def set_command_repeat_at_path(
     else:
         value = {}
     value["repeat_count"] = max(1, int(repeat_count))
-    value["repeat_delay_secs"] = max(0.0, float(repeat_delay_secs))
+    if repeat_delay_secs is not None:
+        value["repeat_delay_secs"] = max(0.0, float(repeat_delay_secs))
     return set_command_value_at_path(overrides, path, value)
 
 
@@ -284,6 +290,197 @@ def clear_command_repeat_at_path(
     if _is_command_meta_dict(remaining):
         return set_command_value_at_path(overrides, path, remaining)
     return remove_command_override_at_path(overrides, path)
+
+
+def clear_all_command_repeats(overrides: dict[str, Any]) -> dict[str, Any]:
+    """Return ``overrides`` without any repeat settings.
+
+    Learned codes and sequences are kept; overrides left with nothing in them
+    are dropped, along with any branch that ends up empty.
+    """
+
+    def _walk(node: Any) -> Any:
+        if not isinstance(node, dict):
+            return node
+        if _is_command_meta_dict(node):
+            rest = {key: item for key, item in node.items() if key not in REPEAT_KEYS}
+            return rest if _is_command_meta_dict(rest) else None
+        out = {}
+        for key, item in node.items():
+            kept = _walk(item)
+            if kept is None or (isinstance(kept, dict) and not kept):
+                continue
+            out[key] = kept
+        return out
+
+    return _walk(parse_command_overrides(overrides)) or {}
+
+
+def _repeat_count_of(node: dict[str, Any]) -> int | None:
+    """The repeat count an override sets, or None when it sets none."""
+    if "repeat_count" in node or "repeats" in node:
+        value = node.get("repeat_count", node.get("repeats"))
+    elif "num_repeats" in node:
+        try:
+            return max(1, int(node["num_repeats"]) + 1)
+        except (TypeError, ValueError):
+            return None
+    else:
+        return None
+    try:
+        return max(1, int(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def command_repeat_list(overrides: Any) -> list[dict[str, Any]]:
+    """List the commands that have their own repeat count.
+
+    Returns ``[{"command": "off", "times": 3}, ...]`` in the order the
+    overrides hold them; the command is the slash-separated path.
+    """
+    found: list[dict[str, Any]] = []
+
+    def _walk(node: Any, prefix: tuple[str, ...]) -> None:
+        if not isinstance(node, dict):
+            return
+        if _is_command_meta_dict(node):
+            times = _repeat_count_of(node)
+            if times is not None and prefix:
+                found.append({"command": command_path_to_key(prefix), "times": times})
+            return
+        for key, item in node.items():
+            _walk(item, prefix + (str(key),))
+
+    _walk(parse_command_overrides(overrides), ())
+    return found
+
+
+def parse_custom_commands(value: Any) -> list[dict[str, Any]]:
+    """Return the entry's custom commands as a clean list.
+
+    Each item is ``{"name", "code", "encoding"}`` plus ``"repeat_count"``
+    when the command has its own count. Items without a name are skipped.
+    """
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            return []
+    if not isinstance(value, list):
+        return []
+
+    commands: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        if not name:
+            continue
+        command: dict[str, Any] = {
+            "name": name,
+            "code": str(item.get("code") or "").strip(),
+            "encoding": str(item.get("encoding") or "Base64"),
+        }
+        times = _repeat_count_of(item)
+        if times is not None:
+            command["repeat_count"] = times
+        commands.append(command)
+    return commands
+
+
+def custom_command_slug(name: str) -> str:
+    """A stable, entity-id friendly form of a custom command name."""
+    slug = "".join(ch if ch.isalnum() else "_" for ch in name.lower())
+    return "_".join(part for part in slug.split("_") if part) or "command"
+
+
+def normalize_ir_code(code: str, encoding: str) -> str:
+    """The code as stored: Base64 without whitespace, others trimmed."""
+    text = code.strip()
+    if encoding == "Base64":
+        return "".join(text.split())
+    if encoding == "Pronto":
+        return " ".join(text.split())
+    return text
+
+
+def detect_ir_code_encoding(code: str) -> str | None:
+    """Tell which format a pasted IR code is in.
+
+    Returns "Raw" for a JSON list of pulse lengths, "Pronto" for Pronto hex,
+    "Base64" for a Broadlink IR packet, and None when it is none of those.
+    """
+    text = code.strip()
+    if not text:
+        return None
+
+    if text.startswith("["):
+        try:
+            pulses = json.loads(text)
+        except json.JSONDecodeError:
+            return None
+        if (
+            isinstance(pulses, list)
+            and len(pulses) > 1
+            and all(isinstance(pulse, int) and not isinstance(pulse, bool) for pulse in pulses)
+        ):
+            return "Raw"
+        return None
+
+    # A code in the right format can still be broken (a cut-off paste), so
+    # each one is also converted to pulses, as sending it would.
+    words = text.split()
+    if len(words) > 4 and all(
+        len(word) == 4 and all(ch in "0123456789abcdefABCDEF" for ch in word)
+        for word in words
+    ):
+        try:
+            Helper.pronto2lirc(bytearray.fromhex("".join(words)))
+        except (ValueError, IndexError):
+            return None
+        return "Pronto"
+
+    try:
+        packet = base64.b64decode("".join(words), validate=True)
+    except (binascii.Error, ValueError):
+        return None
+    # A Broadlink IR packet starts with 0x26; radio packets (0xb2, 0xd7) are
+    # not infrared and are not accepted here.
+    if len(packet) <= 4 or packet[0] != 0x26:
+        return None
+    try:
+        if not Helper.broadlink2lirc(packet):
+            return None
+    except (ValueError, IndexError):
+        return None
+    return "Base64"
+
+
+def device_info_for(
+    unique_id: str | None,
+    name: str | None,
+    manufacturer: str | None,
+    models: Any,
+) -> dict[str, Any] | None:
+    """Device registry info shared by every entity of one AR Smart IR entry.
+
+    Gives the entry a device (named after it, with the codeset's brand and
+    model) so its entities, custom command buttons included, show together.
+    """
+    if not unique_id:
+        return None
+    model = None
+    if isinstance(models, (list, tuple)) and models:
+        model = str(models[0])
+    elif isinstance(models, str):
+        model = models
+    return {
+        "identifiers": {(DOMAIN, str(unique_id))},
+        "name": name,
+        "manufacturer": manufacturer,
+        "model": model,
+    }
 
 
 async def async_load_device_data(
@@ -369,7 +566,6 @@ def infer_title(data: dict[str, Any]) -> str:
     return f"SmartIR {platform.replace('_', ' ').title()} {data.get('device_code', '')}".strip()
     
 import struct
-import binascii
 
 
 class Helper:

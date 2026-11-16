@@ -2,22 +2,22 @@
   "config": {
     "step": {
       "user": {
-        "title": "SmartIR",
-        "description": "Choose the SmartIR device type to set up.",
+        "title": "AR Smart IR",
+        "description": "Choose the type of device to set up.",
         "data": {
           "platform": "Device type"
         }
       },
       "manufacturer": {
         "title": "Manufacturer",
-        "description": "Choose the brand for your SmartIR device.",
+        "description": "Choose the brand of your device.",
         "data": {
           "manufacturer": "Manufacturer"
         }
       },
       "model": {
         "title": "Model / code",
-        "description": "Choose the SmartIR code that matches your device.",
+        "description": "Choose the model, or the code, that matches your device.",
         "data": {
           "device_code": "Model / code",
           "go_back": "Go back to manufacturer selection"
@@ -33,104 +33,144 @@
       },
       "name": {
         "title": "Entity details",
-        "description": "Finish setting up your SmartIR device.\n\nFor MQTT and UFO-R11 (Moes/Tuya ZS06) IR blasters via Zigbee2MQTT, enter the `/set` topic such as `zigbee2mqtt/ufo_r11/set`. For Tuya blasters, enter a `remote.*` entity id, or a JSON config with mode `cloud` (needs `remote_id`) or mode `localtuya` (needs `entity_id` and `dp`). For Infrared, choose an existing Home Assistant `infrared.*` emitter entity.\n\nTest status: {status}",
+        "description": "Finish setting up your device.\n\nFor MQTT and UFO-R11 (Moes/Tuya ZS06) IR blasters via Zigbee2MQTT, enter the `/set` topic such as `zigbee2mqtt/ufo_r11/set`. For Tuya blasters, enter a `remote.*` entity id, or a JSON config with mode `cloud` (needs `remote_id`) or mode `localtuya` (needs `entity_id` and `dp`). For Infrared, choose an existing Home Assistant `infrared.*` emitter entity.\n\nTest status: {status}",
         "data": {
           "name": "Name",
-          "controller_data": "MQTT topic / service name",
-          "controller_entity": "Remote entity (remote.*)",
+          "controller_data": "MQTT topic, service or address",
+          "controller_entity": "Remote entity",
           "infrared_entity": "Infrared emitter",
-          "delay": "Delay between commands",
+          "delay": "Delay between sends (s)",
           "temperature_sensor": "Temperature sensor",
           "humidity_sensor": "Humidity sensor",
           "go_back": "Go back to controller selection",
           "test_command": "Test command",
           "test_device": "Send test command instead of saving",
           "passive_mode": "Passive mode",
-          "temperature_unit": "Codeset temperature unit (advanced)"
+          "temperature_unit": "Codeset temperature unit",
+          "power_sensor": "Power sensor",
+          "power_sensor_restore_state": "Restore the last mode when the power sensor turns on",
+          "device_class": "Device class",
+          "source_names": "Source names"
         },
         "data_description": {
-          "passive_mode": "Only transmit IR when you change a setting. Unchanged states are never re-sent, so the AC unit's own thermostat manages the temperature.",
-          "temperature_unit": "Advanced. Declares the unit the codeset's own temperature keys are written in — it does NOT change how temperatures are displayed. For that, use Home Assistant's unit system or the entity's unit override. Leave on Auto unless a codeset is genuinely mislabelled; an override the codeset's range contradicts is ignored."
+          "passive_mode": "Only send IR when you change a setting. The same state is never sent again, so the device's own thermostat keeps the temperature.",
+          "temperature_unit": "The unit the codeset's temperatures are written in. It does not change how temperatures are shown. Leave on Auto unless the codeset is mislabelled.",
+          "delay": "Used between repeats and between the codes of a command.",
+          "power_sensor": "Tells Home Assistant whether the device is really on. Without it, the state is assumed from the last command sent.",
+          "source_names": "One per line, as “codeset name: name to show”."
         }
       }
     },
     "error": {
       "test_failed": "The test command could not be sent. Check the controller selection and controller data.",
       "controller_target_conflict": "Enter a remote entity OR an MQTT topic / service name — not both.",
-      "required": "Choose a remote entity or enter an MQTT topic / service name."
+      "required": "Choose where the commands are sent from."
     }
   },
   "options": {
     "step": {
       "init": {
-        "title": "SmartIR options",
-        "menu_options": {
-          "general": "General settings",
-          "command": "Repeat or learn one command"
-        }
-      },
-      "general": {
-        "title": "General settings",
-        "description": "Update the UI-configured SmartIR entity and how many times every command is sent.\n\nFor MQTT and UFO-R11 (Moes/Tuya ZS06) IR blasters via Zigbee2MQTT, enter the `/set` topic such as `zigbee2mqtt/ufo_r11/set`. For Tuya blasters, enter a `remote.*` entity id or a JSON config. For Infrared, choose an existing Home Assistant `infrared.*` emitter entity. Native infrared receiver learning is not supported here yet.",
+        "title": "Configure {name}",
+        "description": "**Device:** {device}\nTo change the brand or model: ⋮ › Reconfigure.\n\nChanges are saved when you press Submit.",
         "data": {
           "name": "Name",
-          "controller_data": "MQTT topic / service name",
-          "controller_entity": "Remote entity (remote.*)",
+          "controller": "Controller",
           "infrared_entity": "Infrared emitter",
-          "delay": "Delay between commands",
-          "temperature_sensor": "Temperature sensor",
-          "humidity_sensor": "Humidity sensor",
-          "passive_mode": "Passive mode",
-          "temperature_unit": "Codeset temperature unit (advanced)",
-          "default_repeat_count": "Send every command (times)",
-          "default_repeat_delay_secs": "Delay between repeats"
+          "controller_entity": "Remote entity",
+          "mqtt_topic": "MQTT topic",
+          "lookin_address": "LOOKin address",
+          "esphome_service": "ESPHome service",
+          "tuya_target": "Tuya topic or JSON"
         },
         "data_description": {
-          "passive_mode": "Only transmit IR when you change a setting. Unchanged states are never re-sent, so the AC unit's own thermostat manages the temperature.",
-          "temperature_unit": "Advanced. Declares the unit the codeset's own temperature keys are written in — it does NOT change how temperatures are displayed. For that, use Home Assistant's unit system or the entity's unit override. Leave on Auto unless a codeset is genuinely mislabelled; an override the codeset's range contradicts is ignored.",
-          "default_repeat_count": "How many times each command is sent. A command with its own setting (Options → Repeat or learn one command) uses that instead. Repeating helps when the device sometimes misses a command; an AC beeps once per repeat.",
-          "default_repeat_delay_secs": "Leave empty to use “Delay between commands”."
-        }
-      },
-      "command": {
-        "title": "Pick a command",
-        "description": "Pick the command to repeat or learn. Type to search, e.g. `cool / low / 24`. Commands marked [saved] have their own settings.",
-        "data": {
-          "override_command": "Command"
-        }
-      },
-      "command_edit": {
-        "title": "Command settings",
-        "description": "**{command}**\n\nNow: {current}.\nDevice default (General settings): {default}.",
-        "data": {
-          "use_device_default": "Use the device default",
-          "override_repeat_count": "Send this command (times)",
-          "override_repeat_delay_secs": "Delay between repeats",
-          "learn_command": "Open IR learn wizard (Broadlink / LinkNLink)"
+          "controller": "After changing it, press Submit to choose where it sends from.",
+          "mqtt_topic": "The /set topic, e.g. zigbee2mqtt/ufo_r11/set.",
+          "tuya_target": "A Zigbee2MQTT topic or a JSON config. Fill this or the remote entity, not both."
         },
-        "data_description": {
-          "use_device_default": "Untick to give this command its own count and delay below. A code learned for it is kept either way."
+        "sections": {
+          "repeat_commands": {
+            "name": "Repeat commands",
+            "data": {
+              "default_repeat_count": "Send every command (times)",
+              "delay": "Delay between sends (s)",
+              "command_repeats": "Commands with their own count"
+            },
+            "data_description": {
+              "delay": "Used between repeats and between the codes of a command.",
+              "command_repeats": "Sent this many times instead of the count above."
+            }
+          },
+          "custom_commands": {
+            "name": "Custom commands",
+            "description": "Your own commands. Each one is a button of the device.",
+            "data": {
+              "commands": "Commands"
+            },
+            "data_description": {
+              "commands": "Leave a code empty to record it with the original remote after you press Submit."
+            }
+          },
+          "sensors": {
+            "name": "Sensors",
+            "data": {
+              "temperature_sensor": "Temperature sensor",
+              "humidity_sensor": "Humidity sensor",
+              "power_sensor": "Power sensor",
+              "power_sensor_restore_state": "Restore the last mode when the power sensor turns on"
+            },
+            "data_description": {
+              "temperature_sensor": "Shown as the device's current temperature.",
+              "humidity_sensor": "Shown as the device's current humidity.",
+              "power_sensor": "Tells Home Assistant whether the device is really on. Without it, the state is assumed from the last command sent.",
+              "power_sensor_restore_state": "Needs a power sensor."
+            }
+          },
+          "advanced": {
+            "name": "Advanced",
+            "data": {
+              "passive_mode": "Passive mode",
+              "temperature_unit": "Codeset temperature unit",
+              "device_class": "Device class",
+              "source_names": "Source names"
+            },
+            "data_description": {
+              "passive_mode": "Only send IR when you change a setting. The same state is never sent again, so the device's own thermostat keeps the temperature.",
+              "temperature_unit": "The unit the codeset's temperatures are written in. It does not change how temperatures are shown. Leave on Auto unless the codeset is mislabelled.",
+              "device_class": "How Home Assistant shows this media player.",
+              "source_names": "One per line, as “codeset name: name to show”."
+            }
+          }
         }
       },
-      "learn": {
-        "title": "Learn IR Command",
-        "description": "{status}",
-        "data": {
-          "override_command": "Command to learn / replace",
-          "learn_broadlink_entity": "Broadlink / LinkNLink remote entity",
-          "learn_timeout": "Timeout (seconds)",
-          "go_back": "Go back to options"
+      "record": {
+        "title": "Record custom commands"
+      },
+      "record_failed": {
+        "title": "Nothing received",
+        "description": "{remote} didn't receive the button for “{name}”.",
+        "menu_options": {
+          "record": "Try again",
+          "record_skip": "Skip it (a new command isn't saved; an existing one keeps its code)"
         }
       }
     },
-    "error": {
-      "learn_failed": "IR learning failed. Check the Broadlink/LinkNLink remote entity and try again.",
-      "controller_target_conflict": "Enter a remote entity OR an MQTT topic / service name — not both.",
-      "required": "Choose a remote entity or enter an MQTT topic / service name.",
-      "invalid_command": "Pick a command from the list."
+    "progress": {
+      "record": "Point the original remote at {remote} and press the button for “{name}” ({position} of {total}). Waiting up to 30 s…"
     },
-    "abort": {
-      "no_commands": "This device's codeset has no commands to configure."
+    "error": {
+      "controller_changed": "Controller changed. Choose where it sends from, then press Submit.",
+      "controller_target_conflict": "Fill the remote entity or the topic / JSON, not both.",
+      "target_required": "Choose where the commands are sent from.",
+      "name_required": "Give the device a name.",
+      "repeat_command_unknown": "Repeat commands: one of the commands isn't a command of this device. Pick it from the list.",
+      "repeat_command_duplicate": "Repeat commands: a command is listed twice.",
+      "repeat_times_invalid": "Repeat commands: times must be between 1 and 20.",
+      "custom_name_missing": "Custom commands: every command needs a name.",
+      "custom_name_slash": "Custom commands: don't use “/” in a name.",
+      "custom_name_duplicate": "Custom commands: two commands have the same name.",
+      "custom_name_taken": "Custom commands: that name is already a command of this device.",
+      "custom_code_invalid": "Custom commands: a code isn't Broadlink Base64, Pronto or Raw.",
+      "no_learning_remote": "To record a command, this device needs a Broadlink or LinkNLink remote next to its emitter. Paste the code instead."
     }
   },
   "selector": {
@@ -139,6 +179,37 @@
         "auto": "Auto (detect from codeset)",
         "celsius": "Celsius (°C)",
         "fahrenheit": "Fahrenheit (°F)"
+      }
+    },
+    "command_repeats": {
+      "fields": {
+        "command": {
+          "name": "Command",
+          "description": "Type to search, e.g. off or cool/low/25."
+        },
+        "times": {
+          "name": "Times",
+          "overview_label": "Times: {value}"
+        }
+      }
+    },
+    "custom_commands": {
+      "fields": {
+        "name": {
+          "name": "Name"
+        },
+        "code": {
+          "name": "Code (optional)",
+          "description": "Broadlink Base64, Pronto or Raw. Leave it empty to record it with the original remote after you press Submit.",
+          "overview_label": "Code saved"
+        }
+      }
+    },
+    "device_class": {
+      "options": {
+        "tv": "TV",
+        "receiver": "Receiver",
+        "speaker": "Speaker"
       }
     }
   }

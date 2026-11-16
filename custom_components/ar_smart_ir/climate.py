@@ -24,7 +24,6 @@ from .const import (
     CONF_COMMAND_OVERRIDES,
     CONF_CONTROLLER,
     CONF_DEFAULT_REPEAT_COUNT,
-    CONF_DEFAULT_REPEAT_DELAY,
     CONF_HUMIDITY_SENSOR,
     CONF_PASSIVE_MODE,
     CONF_POWER_SENSOR,
@@ -35,7 +34,7 @@ from .const import (
     TEMPERATURE_UNIT_AUTO,
 )
 from .controller import get_controller
-from .helpers import async_load_device_data
+from .helpers import async_load_device_data, device_info_for
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -182,7 +181,6 @@ class SmartIRClimate(ClimateEntity, RestoreEntity):
         self._default_repeat_count = config.get(
             CONF_DEFAULT_REPEAT_COUNT, DEFAULT_REPEAT_COUNT
         )
-        self._default_repeat_delay_secs = config.get(CONF_DEFAULT_REPEAT_DELAY)
         self._temperature_sensor = config.get(CONF_TEMPERATURE_SENSOR)
         self._humidity_sensor = config.get(CONF_HUMIDITY_SENSOR)
         self._power_sensor = config.get(CONF_POWER_SENSOR)
@@ -262,7 +260,6 @@ class SmartIRClimate(ClimateEntity, RestoreEntity):
             self._controller_data,
             self._delay,
             self._default_repeat_count,
-            self._default_repeat_delay_secs,
         )
 
     async def async_added_to_hass(self):
@@ -398,6 +395,12 @@ class SmartIRClimate(ClimateEntity, RestoreEntity):
     @property
     def unique_id(self):
         return self._unique_id
+
+    @property
+    def device_info(self):
+        return device_info_for(
+            self._unique_id, self._name, self._manufacturer, self._supported_models
+        )
 
     @property
     def name(self):

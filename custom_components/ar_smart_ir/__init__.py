@@ -13,7 +13,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.config_entries import ConfigEntry
 
-from .const import CONF_COMMAND_OVERRIDES, DOMAIN, PLATFORMS
+from .const import BUTTON_PLATFORM, CONF_COMMAND_OVERRIDES, DOMAIN, PLATFORMS
 from .helpers import (
     REPEAT_KEYS,
     get_command_value_at_path,
@@ -330,7 +330,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _LOGGER.debug("AR Smart IR: Registered learn_command service")
 
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
-    await hass.config_entries.async_forward_entry_setups(entry, [platform])
+    # The button platform holds the entry's custom commands, one button each.
+    await hass.config_entries.async_forward_entry_setups(
+        entry, [platform, BUTTON_PLATFORM]
+    )
 
     return True
 
@@ -343,7 +346,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if platform not in PLATFORMS:
         return True
 
-    return await hass.config_entries.async_unload_platforms(entry, [platform])
+    return await hass.config_entries.async_unload_platforms(
+        entry, [platform, BUTTON_PLATFORM]
+    )
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:

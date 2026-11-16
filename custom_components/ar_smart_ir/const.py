@@ -11,9 +11,9 @@ CONF_CONTROLLER_DATA = "controller_data"
 CONF_CONTROLLER_ENTITY = "controller_entity"
 CONF_INFRARED_ENTITY = "infrared_entity"
 CONF_DELAY = "delay"
-# Repeat count and delay for every command that does not set its own.
+# How many times every command is sent, unless it has its own count. The
+# delay between sends is CONF_DELAY.
 CONF_DEFAULT_REPEAT_COUNT = "default_repeat_count"
-CONF_DEFAULT_REPEAT_DELAY = "default_repeat_delay_secs"
 CONF_TEMPERATURE_SENSOR = "temperature_sensor"
 CONF_TEMPERATURE_UNIT = "temperature_unit"
 CONF_HUMIDITY_SENSOR = "humidity_sensor"
@@ -23,6 +23,9 @@ CONF_PASSIVE_MODE = "passive_mode"
 CONF_SOURCE_NAMES = "source_names"
 CONF_DEVICE_CLASS = "device_class"
 CONF_COMMAND_OVERRIDES = "command_overrides"
+# The user's own commands: [{"name", "code", "encoding", "repeat_count"?}].
+# Each one is a button of the device.
+CONF_CUSTOM_COMMANDS = "custom_commands"
 CONF_OVERRIDE_COMMAND = "override_command"
 CONF_OVERRIDE_TYPE = "override_type"
 CONF_OVERRIDE_REPEAT_COUNT = "override_repeat_count"
@@ -34,7 +37,6 @@ CONF_OVERRIDE_SEQUENCE_STEP_3 = "override_sequence_step_3"
 CONF_OVERRIDE_SEQUENCE_STEP_4 = "override_sequence_step_4"
 CONF_OVERRIDE_SEQUENCE_STEP_5 = "override_sequence_step_5"
 CONF_OVERRIDE_REMOVE = "override_remove"
-CONF_USE_DEVICE_DEFAULT = "use_device_default"
 CONF_GO_BACK = "go_back"
 CONF_TEST_COMMAND = "test_command"
 CONF_TEST_DEVICE = "test_device"
@@ -61,6 +63,10 @@ TEMPERATURE_UNIT_OPTIONS = [
 ]
 
 PLATFORMS = ["climate", "fan", "light", "media_player"]
+
+# Set up for every entry, next to its device platform: one button per custom
+# command.
+BUTTON_PLATFORM = "button"
 
 PLATFORM_TITLES = {
     "climate": "Climate",

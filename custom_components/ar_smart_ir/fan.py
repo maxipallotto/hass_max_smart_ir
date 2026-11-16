@@ -18,12 +18,11 @@ from homeassistant.util.percentage import (
 )
 
 from .controller import get_controller
-from .helpers import async_load_device_data
+from .helpers import async_load_device_data, device_info_for
 from .const import (
     CONF_COMMAND_OVERRIDES,
     CONF_CONTROLLER,
     CONF_DEFAULT_REPEAT_COUNT,
-    CONF_DEFAULT_REPEAT_DELAY,
     DEFAULT_REPEAT_COUNT,
 )
 
@@ -79,7 +78,6 @@ class SmartIRFan(FanEntity, RestoreEntity):
         self._default_repeat_count = config.get(
             CONF_DEFAULT_REPEAT_COUNT, DEFAULT_REPEAT_COUNT
         )
-        self._default_repeat_delay_secs = config.get(CONF_DEFAULT_REPEAT_DELAY)
         self._power_sensor = config.get(CONF_POWER_SENSOR)
 
         self._supported_controller = config.get(
@@ -138,7 +136,6 @@ class SmartIRFan(FanEntity, RestoreEntity):
             self._controller_data,
             self._delay,
             self._default_repeat_count,
-            self._default_repeat_delay_secs,
         )
 
     async def async_added_to_hass(self):
@@ -172,6 +169,12 @@ class SmartIRFan(FanEntity, RestoreEntity):
     @property
     def unique_id(self):
         return self._unique_id
+
+    @property
+    def device_info(self):
+        return device_info_for(
+            self._unique_id, self._name, self._manufacturer, self._supported_models
+        )
 
     @property
     def name(self):
