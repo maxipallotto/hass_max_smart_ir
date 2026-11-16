@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import aiofiles
+import asyncio
 import base64
 import binascii
 import json
@@ -496,7 +497,10 @@ async def async_load_device_data(
     platform: str,
     command_overrides: Any = None,
 ) -> dict[str, Any]:
-    path = _resolve_code_path(platform, device_code)
+    # Finding the file checks the custom folders on disk: not on the event loop.
+    path = await asyncio.get_running_loop().run_in_executor(
+        None, _resolve_code_path, platform, device_code
+    )
     async with aiofiles.open(path, mode="r") as jfile:
         device_data = json.loads(await jfile.read())
 
@@ -572,7 +576,12 @@ def infer_title(data: dict[str, Any]) -> str:
     name = data.get("name")
     if name:
         return name
-    return f"SmartIR {platform.replace('_', ' ').title()} {data.get('device_code', '')}".strip()
+    manufacturer = str(data.get("manufacturer") or "").strip()
+    models = data.get("models") or []
+    model = str(models[0]).strip() if isinstance(models, list) and models else ""
+    if manufacturer or model:
+        return f"{manufacturer} {model}".strip()
+    return f"{platform.replace('_', ' ').title()} {data.get('device_code', '')}".strip()
     
 import struct
 

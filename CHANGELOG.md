@@ -49,6 +49,11 @@ changes before 1.7.5, see that repository.
   showed their raw key (`controller`, `power_sensor`,
   `power_sensor_restore_state`, `device_class`, `source_names`) have
   labels.
+- The setup wizard suggests the codeset's brand and model as the device
+  name (e.g. "Hyndai H-ARI22-09H") instead of "SmartIR Climate 2662".
+- The setup wizard reads the codeset catalog and the codeset files off
+  Home Assistant's event loop, which logged "Detected blocking call to
+  listdir/open inside the event loop".
 - Removed: the options menu and the per-command screens of the previous
   build, and replacing a codeset command's code from the options. Codes
   already learned that way keep working.
